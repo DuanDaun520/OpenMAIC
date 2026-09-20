@@ -16,6 +16,8 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Loader2, LogIn, LogOut, Menu, UserRound } from 'lucide-react';
 
+import { fetchAuthMe } from '@/lib/auth/auth-me-client';
+
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -49,19 +51,11 @@ export function SiteHeader() {
   const [loggingOut, setLoggingOut] = useState(false);
 
   const refreshMe = useCallback(async () => {
-    try {
-      const response = await fetch('/api/auth/me');
-      if (!response.ok) {
-        setMe(null);
-        return;
-      }
-      const data = await response.json().catch(() => null);
-      setMe(data?.user ?? null);
-    } catch {
-      setMe(null);
-    } finally {
-      setChecking(false);
-    }
+    // Shared cache (one /api/auth/me per load across layout/page/header);
+    // refresh bypasses it for remounts after soft navigation.
+    const snapshot = await fetchAuthMe<{ user?: MeInfo | null }>({ refresh: true });
+    setMe(snapshot.ok ? (snapshot.body?.user ?? null) : null);
+    setChecking(false);
   }, []);
 
   useEffect(() => {

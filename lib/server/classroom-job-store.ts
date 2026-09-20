@@ -11,6 +11,9 @@ import {
   ensureClassroomJobsDir,
   writeJsonFileAtomic,
 } from '@/lib/server/classroom-storage';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('ClassroomJobStore');
 
 export type ClassroomGenerationJobStatus = 'queued' | 'running' | 'succeeded' | 'failed';
 
@@ -97,6 +100,50 @@ export function isValidClassroomJobId(jobId: string): boolean {
   return /^[a-zA-Z0-9_-]+$/.test(jobId);
 }
 
+/**
+ * Remove one job's status file. Idempotent (ENOENT is fine): terminal job
+ * files are deleted after their response is delivered, and a sweep may have
+ * already removed it. Errors are logged, never thrown — deletion is
+ * housekeeping and must not fail the request that triggered it.
+ */
+export async function deleteClassroomGenerationJob(jobId: string): Promise<void> {
+  try {
+    await fs.rm(jobFilePath(jobId), { force: true });
+  } catch (error) {
+    log.warn(`Failed to remove classroom generation job file [jobId=${jobId}]:`, error);
+  }
+}
+
+/**
+ * Best-effort retention pass over the jobs directory: job files were once
+ * write-only, so a long-lived deployment grew the directory by one file per
+ * generation forever. A running job rewrites its file on every progress
+ * update, so mtime freshness IS liveness — anything older than the same
+ * 30-minute threshold that already declares a job stale is safe to remove
+ * (its runner is gone; a poller would only ever see it as stale-failed).
+ * `*.tmp` entries are crashed atomic writes. A missing directory is a no-op.
+ */
+export async function sweepExpiredClassroomGenerationJobs(): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(CLASSROOM_JOBS_DIR);
+  } catch {
+    return; // Not created yet — nothing to sweep.
+  }
+  for (const entry of entries) {
+    if (!entry.endsWith('.json') && !entry.endsWith('.tmp')) continue;
+    try {
+      const filePath = path.join(CLASSROOM_JOBS_DIR, entry);
+      const stats = await fs.stat(filePath);
+      if (Date.now() - stats.mtimeMs > STALE_JOB_TIMEOUT_MS) {
+        await fs.rm(filePath, { force: true });
+      }
+    } catch {
+      // Raced with another sweeper or an unparsable entry — skip it.
+    }
+  }
+}
+
 export async function createClassroomGenerationJob(
   jobId: string,
   input: GenerateClassroomInput,
@@ -116,6 +163,8 @@ export async function createClassroomGenerationJob(
 
   await ensureClassroomJobsDir();
   await writeJsonFileAtomic(jobFilePath(jobId), job);
+  // One sweep per new job bounds the directory without a cron.
+  void sweepExpiredClassroomGenerationJobs();
   return job;
 }
 

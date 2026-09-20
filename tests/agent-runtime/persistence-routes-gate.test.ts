@@ -33,7 +33,6 @@ const mocks = vi.hoisted(() => ({
   resolveOwnedSession: vi.fn(),
   listSessionMaterials: vi.fn(),
   createSourceMaterial: vi.fn(),
-  getSessionMaterial: vi.fn(),
   fakeStore: null as ReturnType<typeof createFakeDocumentStore> | null,
   queryPool: {
     query: vi.fn(),
@@ -69,7 +68,6 @@ vi.mock('@/lib/server/agent-runtime/session-materials', async (importOriginal) =
     resolveOwnedSession: mocks.resolveOwnedSession,
     listSessionMaterials: mocks.listSessionMaterials,
     createSourceMaterial: mocks.createSourceMaterial,
-    getSessionMaterial: mocks.getSessionMaterial,
   };
 });
 
@@ -84,15 +82,10 @@ import { GET as getScenes } from '@/app/api/stages/[id]/scenes/route';
 import { GET as getManifest } from '@/app/api/stages/[id]/manifest/route';
 import { GET as getFreshness } from '@/app/api/stages/[id]/freshness/route';
 import { GET as getMaterials, POST as postMaterials } from '@/app/api/materials/route';
-import { GET as getMaterial } from '@/app/api/materials/[id]/route';
 import { GET as getFolders, POST as postFolders } from '@/app/api/folders/route';
 import { DELETE as deleteFolder, PATCH as patchFolder } from '@/app/api/folders/[id]/route';
-import { POST as postFolderMembers } from '@/app/api/folders/members/route';
 import { GET as getStageMeta } from '@/app/api/stage-meta/[stageId]/route';
-import { GET as getStageStatus } from '@/app/api/stages/[id]/status/route';
 import { POST as postGenerationComplete } from '@/app/api/stages/[id]/generation-complete/route';
-import { POST as postPublish } from '@/app/api/stages/[id]/publish/route';
-import { POST as postUnpublish } from '@/app/api/stages/[id]/unpublish/route';
 
 interface RouteCase {
   name: string;
@@ -209,15 +202,6 @@ const ROUTES: RouteCase[] = [
     happyStatus: 201,
   },
   {
-    name: 'GET /api/materials/[id]',
-    call: () =>
-      getMaterial(
-        new NextRequest(`http://localhost/api/materials/${MATERIAL_ID}?sessionId=${SESSION_ID}`),
-        params(MATERIAL_ID),
-      ),
-    happyStatus: 200,
-  },
-  {
     name: 'GET /api/folders',
     call: () => getFolders(new NextRequest('http://localhost/api/folders')),
     happyStatus: 200,
@@ -257,32 +241,11 @@ const ROUTES: RouteCase[] = [
     happyStatus: 200,
   },
   {
-    name: 'POST /api/folders/members',
-    call: () =>
-      postFolderMembers(
-        new NextRequest('http://localhost/api/folders/members', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ stageId: STAGE_ID, folderId: FOLDER_ID }),
-        }),
-      ),
-    happyStatus: 200,
-  },
-  {
     name: 'GET /api/stage-meta/[stageId]',
     call: () =>
       getStageMeta(
         new NextRequest(`http://localhost/api/stage-meta/${STAGE_ID}`),
         stageMetaParams(STAGE_ID),
-      ),
-    happyStatus: 200,
-  },
-  {
-    name: 'GET /api/stages/[id]/status',
-    call: () =>
-      getStageStatus(
-        new NextRequest(`http://localhost/api/stages/${STAGE_ID}/status`),
-        params(STAGE_ID),
       ),
     happyStatus: 200,
   },
@@ -293,24 +256,6 @@ const ROUTES: RouteCase[] = [
         new NextRequest(`http://localhost/api/stages/${STAGE_ID}/generation-complete`, {
           method: 'POST',
         }),
-        params(STAGE_ID),
-      ),
-    happyStatus: 200,
-  },
-  {
-    name: 'POST /api/stages/[id]/publish',
-    call: () =>
-      postPublish(
-        new NextRequest(`http://localhost/api/stages/${STAGE_ID}/publish`, { method: 'POST' }),
-        params(STAGE_ID),
-      ),
-    happyStatus: 200,
-  },
-  {
-    name: 'POST /api/stages/[id]/unpublish',
-    call: () =>
-      postUnpublish(
-        new NextRequest(`http://localhost/api/stages/${STAGE_ID}/unpublish`, { method: 'POST' }),
         params(STAGE_ID),
       ),
     happyStatus: 200,
@@ -375,7 +320,6 @@ for (const state of STATES) {
       mocks.resolveOwnedSession.mockResolvedValue({ id: SESSION_ID, ownerId: 'owner-1' });
       mocks.listSessionMaterials.mockResolvedValue([material()]);
       mocks.createSourceMaterial.mockResolvedValue(material());
-      mocks.getSessionMaterial.mockResolvedValue(material());
       mocks.fakeStore = createFakeDocumentStore();
       mocks.fakeStore.docs.set(
         STAGE_ID,

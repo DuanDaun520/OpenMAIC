@@ -38,10 +38,7 @@ vi.mock('@/lib/persistence/server-provider', () => ({
 }));
 
 import { GET as getStageMeta } from '@/app/api/stage-meta/[stageId]/route';
-import { GET as getStatus } from '@/app/api/stages/[id]/status/route';
 import { POST as postGenerationComplete } from '@/app/api/stages/[id]/generation-complete/route';
-import { POST as postPublish } from '@/app/api/stages/[id]/publish/route';
-import { POST as postUnpublish } from '@/app/api/stages/[id]/unpublish/route';
 
 const STAGE_ID = 'stage-1';
 const stageMetaParams = (stageId: string) => ({ params: Promise.resolve({ stageId }) });
@@ -132,38 +129,6 @@ describe('GET /api/stage-meta/[stageId]', () => {
   });
 });
 
-describe('GET /api/stages/[id]/status', () => {
-  it('returns the public state without auth', async () => {
-    mocks.accessRow!.meta_is_public = true;
-    mocks.accessRow!.meta_published_at = 1_700_000_000_000;
-    const response = await getStatus(
-      new NextRequest(`http://localhost/api/stages/${STAGE_ID}/status`),
-      params(STAGE_ID),
-    );
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      isPublic: true,
-      publishedAt: 1_700_000_000_000,
-    });
-  });
-
-  it('answers 404 for a missing course', async () => {
-    mocks.accessRow = {
-      meta_owner_id: null,
-      meta_is_public: false,
-      meta_published_at: null,
-      meta_generation_complete: false,
-      meta_deleted_at: null,
-      document_name: null,
-    };
-    const response = await getStatus(
-      new NextRequest(`http://localhost/api/stages/${STAGE_ID}/status`),
-      params(STAGE_ID),
-    );
-    expect(response.status).toBe(404);
-  });
-});
-
 describe('POST /api/stages/[id]/generation-complete', () => {
   it('marks the owner’s course generation-complete', async () => {
     const response = await postGenerationComplete(
@@ -186,39 +151,5 @@ describe('POST /api/stages/[id]/generation-complete', () => {
     );
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: 'forbidden' });
-  });
-});
-
-describe('POST /api/stages/[id]/publish and unpublish', () => {
-  it('publishes an owner’s private course and returns the timestamp', async () => {
-    const response = await postPublish(
-      new NextRequest(`http://localhost/api/stages/${STAGE_ID}/publish`, { method: 'POST' }),
-      params(STAGE_ID),
-    );
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as { success: boolean; publishedAt: number; name: string };
-    expect(body).toMatchObject({ success: true, name: 'Course' });
-    expect(typeof body.publishedAt).toBe('number');
-  });
-
-  it('unpublishes and clears the timestamp', async () => {
-    mocks.accessRow!.meta_is_public = true;
-    mocks.accessRow!.meta_published_at = 1_700_000_000_000;
-    const response = await postUnpublish(
-      new NextRequest(`http://localhost/api/stages/${STAGE_ID}/unpublish`, { method: 'POST' }),
-      params(STAGE_ID),
-    );
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ success: true });
-  });
-
-  it('refuses an anonymous owner with login_required', async () => {
-    mocks.resolveRequestOwnerId.mockReturnValue('anon:00000000-0000-4000-8000-000000000000');
-    const response = await postPublish(
-      new NextRequest(`http://localhost/api/stages/${STAGE_ID}/publish`, { method: 'POST' }),
-      params(STAGE_ID),
-    );
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({ error: 'login_required' });
   });
 });

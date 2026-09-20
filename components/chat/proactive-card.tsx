@@ -49,7 +49,10 @@ export const ProactiveCard = ({
   onTogglePause,
 }: ProactiveCardProps) => {
   const { t } = useI18n();
-  const [progress, setProgress] = useState(100);
+  const [remainingMs, setRemainingMs] = useState(DISCUSSION_AUTO_SKIP_MS);
+  // Survives effect re-runs so pausing freezes the countdown mid-flight and
+  // resuming continues from the frozen remainder instead of restarting.
+  const remainingRef = useRef(DISCUSSION_AUTO_SKIP_MS);
   const skippedRef = useRef(false);
   const isPaused = mode === 'paused';
 
@@ -76,7 +79,17 @@ export const ProactiveCard = ({
     const tailOffset = Math.max(16, Math.min(CARD_WIDTH - 16, anchorCenterX - cardLeft));
     const bottom = window.innerHeight - anchorTop + 12; // 12px gap above anchor
 
-    setPos({ left: cardLeft, bottom, tailOffset });
+    // Round to whole pixels: the anchor rect jitters fractionally frame to
+    // frame, and only an unchanged position comparing equal can suppress the
+    // re-render (a fresh object never does).
+    const left = Math.round(cardLeft);
+    const bottomPx = Math.round(bottom);
+    const tail = Math.round(tailOffset);
+    setPos((prev) =>
+      prev && prev.left === left && prev.bottom === bottomPx && prev.tailOffset === tail
+        ? prev
+        : { left, bottom: bottomPx, tailOffset: tail },
+    );
   }, [anchorRef]);
 
   // Continuously track anchor position via rAF to handle CSS transitions, sidebar collapse, etc.
@@ -93,30 +106,39 @@ export const ProactiveCard = ({
   useEffect(() => {
     if (mode !== 'playback') return;
 
-    const duration = DISCUSSION_AUTO_SKIP_MS;
-    const interval = 50;
-    const step = (interval / duration) * 100;
-
+    // Deadline-based, not accumulated: the remaining time derives from one
+    // immutable deadline so ticks cannot drift, and a 250ms cadence is enough
+    // because the bar interpolates via its CSS width transition and the
+    // countdown text only ever shows whole seconds.
+    const TICK_MS = 250;
+    const deadline = Date.now() + remainingRef.current;
     const timer = setInterval(() => {
-      setProgress((prev) => {
-        const newProgress = prev - step;
-        if (newProgress <= 0) {
-          clearInterval(timer);
-          return 0;
-        }
-        return newProgress;
-      });
-    }, interval);
+      const remaining = Math.max(0, deadline - Date.now());
+      remainingRef.current = remaining;
+      if (remaining <= 0) {
+        clearInterval(timer);
+        setRemainingMs(0);
+        return;
+      }
+      setRemainingMs((prev) =>
+        Math.ceil(remaining / 1000) === Math.ceil(prev / 1000) ? prev : remaining,
+      );
+    }, TICK_MS);
 
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      // Freeze at the paused position; the next playback effect re-derives its
+      // deadline from this value.
+      remainingRef.current = Math.max(0, deadline - Date.now());
+    };
   }, [mode]);
 
   useEffect(() => {
-    if (progress <= 0 && !skippedRef.current && mode === 'playback') {
+    if (remainingMs <= 0 && !skippedRef.current && mode === 'playback') {
       skippedRef.current = true;
       onSkip();
     }
-  }, [progress, onSkip, mode]);
+  }, [remainingMs, onSkip, mode]);
 
   if (!pos) return null;
 
@@ -161,12 +183,12 @@ export const ProactiveCard = ({
           {/* Progress Bar */}
           <div className="absolute top-0 left-0 right-0 h-1 bg-gray-50/50 dark:bg-gray-700/50">
             <div
-              className={`h-full transition-all duration-[50ms] ease-linear ${
+              className={`h-full transition-[width] duration-[250ms] ease-linear ${
                 isPaused
                   ? 'bg-gray-300 dark:bg-gray-600'
                   : 'bg-gradient-to-r from-amber-400 to-amber-500 dark:from-amber-500 dark:to-amber-600'
               }`}
-              style={{ width: `${progress}%` }}
+              style={{ width: `${(remainingMs / DISCUSSION_AUTO_SKIP_MS) * 100}%` }}
             />
           </div>
 
@@ -202,7 +224,7 @@ export const ProactiveCard = ({
                 isPaused ? 'text-gray-300 dark:text-gray-600' : 'text-gray-400 dark:text-gray-500'
               }`}
             >
-              {Math.max(0, Math.ceil((progress / 100) * (DISCUSSION_AUTO_SKIP_MS / 1000)))}s
+              {Math.max(0, Math.ceil(remainingMs / 1000))}s
             </span>
           </div>
 

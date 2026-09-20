@@ -5,11 +5,24 @@ import type { InteractiveContent } from '@/lib/types/stage';
 import { useInteractiveIframePool } from '@/lib/store/interactive-iframe-pool';
 import { patchHtmlForIframe } from '@/lib/utils/iframe';
 import { visibleClientRect } from '@/lib/edit/visible-client-rect';
+import type { ClientBox } from '@/lib/edit/visible-client-rect';
 
 interface InteractiveRendererProps {
   readonly content: InteractiveContent;
   readonly sceneId: string;
 }
+
+function sameBox(a: ClientBox | null, b: ClientBox | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height;
+}
+
+// Frames the rect must hold steady before the rAF loop parks itself, mirroring
+// use-tracked-rect. The stage layers deliberately carry no ancestor transforms
+// (see stage.tsx), so a ResizeObserver on the slot plus window scroll (capture —
+// scroll does not bubble past the stage's overflow containers) and resize are
+// the only things that can move this slot's screen rect; those re-arm the loop.
+const STABLE_FRAMES_BEFORE_IDLE = 20;
 
 /**
  * Placeholder for an interactive scene. The actual iframe lives in the stable
@@ -49,22 +62,58 @@ export function InteractiveRenderer({ content, sceneId }: InteractiveRendererPro
     return () => release(sceneId, owner);
   }, [sceneId, owner, patchedHtml, content.url, mount, setActive, claim, release]);
 
-  // Track this slot's screen rect for the host. rAF loop mirrors useTrackedRect:
-  // one getBoundingClientRect read resolves canvas scale, viewport offset and
-  // scroll, following the box through every resize / layout change.
+  // Track this slot's screen rect for the host. A plain rAF loop never parks,
+  // and every frame here runs getBoundingClientRect PLUS visibleClientRect —
+  // which walks every ancestor's computed style — for every mounted
+  // placeholder. So the loop parks itself once the rect+clip hold steady
+  // (same pattern as useTrackedRect) and re-arms on the events that can
+  // actually move the slot: its own resize, scroll, and window resize.
   useEffect(() => {
     let raf = 0;
+    let stableFrames = 0;
+    let last: { r: ClientBox; clip: ClientBox } | null = null;
     const measure = () => {
       const node = slotRef.current;
       if (node) {
-        const r = node.getBoundingClientRect();
+        const domRect = node.getBoundingClientRect();
+        const r: ClientBox = {
+          left: domRect.left,
+          top: domRect.top,
+          width: domRect.width,
+          height: domRect.height,
+        };
         const clip = visibleClientRect(node);
-        setRect(sceneId, { left: r.left, top: r.top, width: r.width, height: r.height }, clip);
+        if (last && sameBox(last.r, r) && sameBox(last.clip, clip)) {
+          stableFrames += 1;
+        } else {
+          stableFrames = 0;
+          last = { r, clip };
+          // The pool's own setRect equality-guards, so an unchanged call is a
+          // no-op there; we publish only on real movement.
+          setRect(sceneId, r, clip);
+        }
+        if (stableFrames >= STABLE_FRAMES_BEFORE_IDLE) {
+          raf = 0;
+          return;
+        }
       }
       raf = requestAnimationFrame(measure);
     };
-    raf = requestAnimationFrame(measure);
-    return () => cancelAnimationFrame(raf);
+    const arm = () => {
+      stableFrames = 0;
+      if (!raf) raf = requestAnimationFrame(measure);
+    };
+    arm();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(arm) : null;
+    if (ro && slotRef.current) ro.observe(slotRef.current);
+    window.addEventListener('scroll', arm, true);
+    window.addEventListener('resize', arm);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      ro?.disconnect();
+      window.removeEventListener('scroll', arm, true);
+      window.removeEventListener('resize', arm);
+    };
   }, [sceneId, setRect]);
 
   return <div ref={slotRef} className="w-full h-full" aria-hidden />;

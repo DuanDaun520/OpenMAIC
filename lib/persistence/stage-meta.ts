@@ -224,18 +224,3 @@ export async function recordGenerationError(
   );
   return result.rows.length === 1;
 }
-
-/** Publish (isPublic=true, publishedAt set) or unpublish (isPublic=false, publishedAt cleared). */
-export async function setStagePublished(
-  queryable: Queryable,
-  stageId: string,
-  isPublic: boolean,
-  publishedAt: number | null,
-): Promise<void> {
-  await queryable.query(
-    `UPDATE stage_meta
-        SET is_public = $2, published_at = $3
-      WHERE stage_id = $1 AND deleted_at IS NULL`,
-    [stageId, isPublic, publishedAt],
-  );
-}

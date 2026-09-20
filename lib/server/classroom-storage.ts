@@ -15,7 +15,13 @@ const log = createLogger('ClassroomStorage');
 export const CLASSROOMS_DIR = process.env.OPENMAIC_CLASSROOMS_DIR
   ? path.resolve(process.env.OPENMAIC_CLASSROOMS_DIR)
   : path.join(process.cwd(), 'data', 'classrooms');
-export const CLASSROOM_JOBS_DIR = path.join(process.cwd(), 'data', 'classroom-jobs');
+/**
+ * Job status files for the external generate-classroom API. Same override
+ * pattern as CLASSROOMS_DIR (hermetic tests; non-default data volume).
+ */
+export const CLASSROOM_JOBS_DIR = process.env.OPENMAIC_CLASSROOM_JOBS_DIR
+  ? path.resolve(process.env.OPENMAIC_CLASSROOM_JOBS_DIR)
+  : path.join(process.cwd(), 'data', 'classroom-jobs');
 
 /** Id length shared by the create route and the generation pipeline. */
 export const CLASSROOM_ID_LENGTH = 10;

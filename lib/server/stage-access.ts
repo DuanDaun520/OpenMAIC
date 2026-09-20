@@ -6,8 +6,7 @@
  * document store: it records who owns a course, whether it is public, when it
  * was published, whether generation completed, and (via `deleted_at`) the
  * tombstone. This module is the single resolver the viewer-facing routes
- * (`/api/stage-meta/:id`, `/api/stages/:id/status`, publish/unpublish,
- * generation-complete) go through.
+ * (`/api/stage-meta/:id`, generation-complete) go through.
  */
 import { getAdminPool } from '@/lib/admin/db';
 import { getServerPersistenceProvider } from '@/lib/persistence/server-provider';

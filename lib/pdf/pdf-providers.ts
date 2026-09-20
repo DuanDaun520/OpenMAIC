@@ -138,7 +138,6 @@
  */
 
 import { extractText, getDocumentProxy, extractImages } from 'unpdf';
-import sharp from 'sharp';
 import type { PDFParserConfig } from './types';
 import type { ParsedPdfContent } from '@/lib/types/pdf';
 import { PDF_PROVIDERS } from './constants';
@@ -146,6 +145,16 @@ import { createLogger } from '@/lib/logger';
 import { extractMinerUResult } from './mineru-parser';
 import { parseWithMinerUCloud } from './mineru-cloud';
 import { parseWithAliDocMindClient } from './alidocmind-client';
+
+// sharp binds native code at import time, and this module is transitively
+// imported by extract-document / parse-pdf at cold start even when no image is
+// ever converted (text-only extraction never touches it) — so it loads lazily
+// and memoized. `.default` is the CJS interop shape of the dynamic import.
+let sharpModule: Promise<typeof import('sharp')> | null = null;
+function loadSharp() {
+  sharpModule ??= import('sharp');
+  return sharpModule;
+}
 
 const log = createLogger('PDFProviders');
 const DEFAULT_MINERU_BACKEND = 'pipeline';
@@ -279,6 +288,9 @@ async function parseWithUnpdf(pdfBuffer: Buffer, textOnly = false): Promise<Pars
   for (let pageNum = 1; !textOnly && pageNum <= numPages; pageNum++) {
     try {
       const pageImages = await extractImages(pdf, pageNum);
+      // Loaded once per page batch; the loader memoizes across calls (the
+      // loop only runs when !textOnly, so an image is really being converted).
+      const sharp = (await loadSharp()).default;
       for (let i = 0; i < pageImages.length; i++) {
         const imgData = pageImages[i];
         try {
@@ -466,6 +478,7 @@ export async function fetchAliDocMindImageAsBase64(url: string): Promise<string 
       }
     }
     const buf = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+    const sharp = (await loadSharp()).default;
     const png = await sharp(buf).png().toBuffer();
     return `data:image/png;base64,${png.toString('base64')}`;
   } catch (err) {

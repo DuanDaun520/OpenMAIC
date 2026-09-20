@@ -61,11 +61,19 @@ export function AgentRevealModal({ agents, open, onClose, onAllRevealed }: Agent
     }
 
     let i = 0;
+    // Created inside the start-timeout callback, so it must live in this
+    // enclosing scope for the effect cleanup to reach it — a return inside the
+    // setTimeout callback would be ignored (the old dead-code cleanup leaked
+    // the interval when the modal closed mid-reveal).
+    let interval: ReturnType<typeof setInterval> | undefined;
     const startTimeout = setTimeout(() => {
       i = 1;
       setRevealedCount(1);
 
       if (agents.length <= 1) {
+        // Deliberately NOT cleared by the effect cleanup: allRevealedFiredRef
+        // makes firing idempotent, and clearing would change when a
+        // close-then-reopen fires onAllRevealed.
         setTimeout(() => {
           if (!allRevealedFiredRef.current) {
             allRevealedFiredRef.current = true;
@@ -75,7 +83,7 @@ export function AgentRevealModal({ agents, open, onClose, onAllRevealed }: Agent
         return;
       }
 
-      const interval = setInterval(() => {
+      interval = setInterval(() => {
         i++;
         setRevealedCount(i);
         if (i >= agents.length) {
@@ -88,11 +96,12 @@ export function AgentRevealModal({ agents, open, onClose, onAllRevealed }: Agent
           }, 600);
         }
       }, 500);
-
-      return () => clearInterval(interval);
     }, 400);
 
-    return () => clearTimeout(startTimeout);
+    return () => {
+      clearTimeout(startTimeout);
+      if (interval) clearInterval(interval);
+    };
   }, [open, agents.length]);
 
   // Switch from preserve-3d to flat after all flip animations complete to enable scrolling

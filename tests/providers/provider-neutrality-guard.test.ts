@@ -261,7 +261,7 @@ const TEMPORARY_VENDOR_DEBT: readonly AllowedVendorDebt[] = [
     'lib/document/extractors/media-registry.ts',
     'Temporary: the media-extractor fallback chain still names concrete providers in registry and operator guidance.',
     [
-      ['local', 4],
+      ['local', 3],
       ['ffmpeg', 1],
       ['alidocmind', 1],
     ],

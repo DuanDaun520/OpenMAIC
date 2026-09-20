@@ -1,14 +1,68 @@
-import { mediaBackedExtractorProviders } from './media';
-import { localMediaExtractorProvider } from './local-media';
+import { getMediaExtractorManifestEntries, type MediaExtractorManifestEntry } from './manifest';
 import type {
   MediaExtractorInput,
   MediaExtractorProvider,
   MediaExtractorProviderId,
 } from '../types';
 
+// Metadata-only until first use: provider selection needs only the
+// browser-safe manifest entries, while the implementation modules — which pull
+// in `child_process`, the ASR clients and `@alicloud/*` — load when an
+// availability check or extraction actually runs. Routes that reach this
+// registry but never extract media stay free of that weight.
+//
+// Dispatch stays provider-neutral: the array-exporting implementation module
+// serves the service-backed entries, and the single-provider module is the
+// fallback. This file deliberately names no concrete provider id (the
+// provider-neutrality guard pins this surface by occurrence count).
+let cloudBackedProviders: Promise<MediaExtractorProvider[]> | null = null;
+function loadCloudBackedProviders() {
+  cloudBackedProviders ??= import('./media').then((m) => m.mediaBackedExtractorProviders);
+  return cloudBackedProviders;
+}
+
+let diskBackedProvider: Promise<MediaExtractorProvider> | null = null;
+function loadDiskBackedProvider() {
+  diskBackedProvider ??= import('./local-media').then((m) => m.localMediaExtractorProvider);
+  return diskBackedProvider;
+}
+
+async function resolveImplementation(id: MediaExtractorProviderId) {
+  const found = (await loadCloudBackedProviders()).find((p) => p.id === id);
+  if (found) return found;
+  const fallback = await loadDiskBackedProvider();
+  if (fallback.id !== id) {
+    throw new Error(`Media extractor "${id}" failed to load`);
+  }
+  return fallback;
+}
+
+function createLazyMediaExtractor(entry: MediaExtractorManifestEntry): MediaExtractorProvider {
+  // The manifest is the single source of provider identity (RFC #1153 part 1);
+  // its declared ids are exactly this registry's known ids.
+  const id = entry.id as MediaExtractorProviderId;
+  const { id: _id, ...metadata } = entry;
+  return {
+    ...metadata,
+    id,
+    async availability(input: MediaExtractorInput) {
+      const provider = await resolveImplementation(id);
+      // A provider without an availability check is unconditionally available
+      // (the optional method already means that in `selectMediaExtractorProvider`).
+      return (await provider.availability?.(input)) ?? { available: true };
+    },
+    async extract(input: MediaExtractorInput) {
+      const provider = await resolveImplementation(id);
+      return provider.extract(input);
+    },
+  };
+}
+
+// Manifest insertion order IS the auto-selection order and matches the
+// registry order this file used to build eagerly.
 const MEDIA_EXTRACTOR_PROVIDERS: Record<MediaExtractorProviderId, MediaExtractorProvider> =
   Object.fromEntries(
-    [...mediaBackedExtractorProviders, localMediaExtractorProvider].map((p) => [p.id, p]),
+    getMediaExtractorManifestEntries().map((entry) => [entry.id, createLazyMediaExtractor(entry)]),
   );
 
 export function getMediaExtractorProviders(): MediaExtractorProvider[] {

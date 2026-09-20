@@ -21,7 +21,6 @@ vi.mock('@/lib/server/agent-runtime/owner-scoped-documents', () => ({
 
 import { GET, POST } from '@/app/api/folders/route';
 import { DELETE, PATCH } from '@/app/api/folders/[id]/route';
-import { POST as postMembers } from '@/app/api/folders/members/route';
 
 function routeRequest(
   url: string,
@@ -213,49 +212,5 @@ describe('DELETE /api/folders/[id]', () => {
       params('missing'),
     );
     expect(response.status).toBe(404);
-  });
-});
-
-describe('POST /api/folders/members', () => {
-  async function post(body: unknown) {
-    return postMembers(
-      routeRequest('http://localhost/api/folders/members', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }),
-    );
-  }
-
-  it('files a course into a folder', async () => {
-    await mocks.fakeStore!.store.createFolder('folder-a', 'Math');
-    const response = await post({ stageId: 'stage-1', folderId: 'folder-a' });
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true });
-  });
-
-  it('un-files a course when folderId is null (idempotent)', async () => {
-    await mocks.fakeStore!.store.createFolder('folder-a', 'Math');
-    await post({ stageId: 'stage-1', folderId: 'folder-a' });
-    const unfiled = await post({ stageId: 'stage-1', folderId: null });
-    expect(unfiled.status).toBe(200);
-    const again = await post({ stageId: 'stage-1', folderId: null });
-    expect(again.status).toBe(200);
-  });
-
-  it('returns 404 when the folder is not found', async () => {
-    const response = await post({ stageId: 'stage-1', folderId: 'missing' });
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: 'FOLDER_NOT_FOUND' },
-    });
-  });
-
-  it('rejects a missing stageId', async () => {
-    const response = await post({ folderId: null });
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: 'MISSING_STAGE_ID' },
-    });
   });
 });

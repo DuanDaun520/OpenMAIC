@@ -2,8 +2,15 @@ const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
 type LogLevel = keyof typeof LOG_LEVELS;
 
 function getMinLevel(): LogLevel {
-  const env = (process.env.LOG_LEVEL ?? 'info').toLowerCase();
-  return env in LOG_LEVELS ? (env as LogLevel) : 'info';
+  // Prod default is warn: info logs are diagnostics, and every one of them
+  // reaches the console (and the platform's log ingest) — the stage store
+  // alone logs on every debounced save. LOG_LEVEL overrides in either
+  // environment. In client bundles Next inlines NODE_ENV (so the browser is
+  // quiet in prod too) while LOG_LEVEL is not inlined and falls through to
+  // the default there, exactly as before.
+  const fallback: LogLevel = process.env.NODE_ENV === 'production' ? 'warn' : 'info';
+  const env = (process.env.LOG_LEVEL ?? fallback).toLowerCase();
+  return env in LOG_LEVELS ? (env as LogLevel) : fallback;
 }
 
 function isJsonFormat(): boolean {
