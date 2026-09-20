@@ -1,5 +1,9 @@
 services:
   openmaic:
+    # Fixed container name (Openmaic-* prefix) for predictable `docker logs` /
+    # `docker exec` / monitoring references. The compose service name below
+    # stays `openmaic` — that is the DNS name other services use.
+    container_name: Openmaic-app
     build:
       context: .
       args:
@@ -40,12 +44,21 @@ services:
       # Optional: mount server-providers.yml for provider config
       # - ./server-providers.yml:/app/server-providers.yml:ro
       - openmaic-data:/app/data
+    # /api/health is whitelisted past ACCESS_CODE (see proxy.ts), so this works
+    # for locked-down deployments too. busybox wget ships with the alpine base.
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3000/api/health >/dev/null || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
 
   # Optional PostgreSQL backing for the app-embedded persistence API.
   # The app reads DATABASE_URL and PERSISTENCE_DEV_TOKEN from .env.local; keeping
   # those values there avoids changing the default browser-only deployment.
   postgres:
+    container_name: Openmaic-postgres
     image: postgres:16
     profiles:
       - server-persistence
@@ -79,6 +92,7 @@ services:
   # replies on app-initiated connections. The export ZIP is self-contained, so
   # the render needs no outbound at all.
   render-service:
+    container_name: Openmaic-render
     build: ./render-service
     profiles:
       - video-export
@@ -145,5 +159,9 @@ networks:
     internal: true
 
 volumes:
+  # Explicit names (instead of the compose-project-prefixed defaults) so
+  # backup/restore commands can reference them deterministically.
   openmaic-data:
+    name: Openmaic-data
   openmaic-postgres:
+    name: Openmaic-postgres
