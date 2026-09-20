@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * /admin/voices — TTS 音色管理.
+ * /admin/voices — TTS 音色管理（仅豆包 TTS 2.0 · 火山引擎）.
  *
  * Edits the effective voice catalog each picker offers: rename / re-gender /
  * hide registry voices (fixing mislabeled catalog entries without a deploy),
@@ -43,7 +43,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface EffectiveVoice {
   id: string;
@@ -219,7 +218,8 @@ export default function AdminVoicesPage() {
         <div>
           <h1 className="text-xl font-semibold">音色管理</h1>
           <p className="text-muted-foreground text-sm">
-            修正音色名称/性别、隐藏不可用音色、新增自定义音色；客户端与服务端选择器同步生效
+            豆包 TTS
+            2.0（火山引擎）：修正音色名称/性别、隐藏不可用音色、新增自定义音色；客户端与服务端选择器同步生效
             {overrideCount > 0 ? `（当前 ${overrideCount} 条覆盖）` : ''}
           </p>
         </div>
@@ -246,146 +246,134 @@ export default function AdminVoicesPage() {
         </Alert>
       ) : null}
 
-      <Tabs defaultValue={data?.providers[0]?.providerId}>
-        <TabsList className="flex-wrap">
-          {(data?.providers ?? []).map((provider) => (
-            <TabsTrigger key={provider.providerId} value={provider.providerId}>
-              {provider.providerName}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        {(data?.providers ?? []).map((provider) => {
-          const visible = provider.voices.filter((voice) => !voice.hidden);
-          const hidden = provider.voices.filter((voice) => voice.hidden);
-          return (
-            <TabsContent key={provider.providerId} value={provider.providerId} className="mt-4">
-              <Card>
-                <CardHeader className="flex-row items-center justify-between space-y-0">
-                  <div>
-                    <CardTitle className="text-base">{provider.providerName} · 音色表</CardTitle>
-                    <CardDescription>
-                      显示名与性别影响选择器展示及老师头像联动；隐藏 =
-                      不再出现在任何选择器（已绑定课程不受影响）
-                    </CardDescription>
-                  </div>
-                  <Button size="sm" onClick={() => openCreate(provider)}>
-                    <Plus className="size-4" />
-                    新增音色
-                  </Button>
-                </CardHeader>
-                <CardContent>
-                  {visible.length + hidden.length === 0 ? (
-                    <p className="text-muted-foreground py-6 text-center text-sm">
-                      该 Provider 无预置音色。
-                    </p>
-                  ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Voice ID</TableHead>
-                          <TableHead>显示名称</TableHead>
-                          <TableHead>性别</TableHead>
-                          <TableHead>语言</TableHead>
-                          <TableHead>来源</TableHead>
-                          <TableHead className="text-right">操作</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {visible.map((voice) => (
-                          <TableRow key={voice.id}>
-                            <TableCell className="max-w-64 truncate font-mono text-xs">
-                              {voice.id}
-                            </TableCell>
-                            <TableCell className="font-medium">{voice.name}</TableCell>
-                            <TableCell>
-                              {voice.gender ? (GENDER_LABELS[voice.gender] ?? voice.gender) : '—'}
-                            </TableCell>
-                            <TableCell className="text-xs">{voice.language ?? '—'}</TableCell>
-                            <TableCell>
-                              {voice.isCustomAddition ? (
-                                <Badge variant="secondary">自定义</Badge>
-                              ) : voice.overridden ? (
-                                <Badge variant="outline">已覆盖</Badge>
-                              ) : (
-                                <span className="text-muted-foreground text-xs">预设</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => openEdit(provider, voice)}
-                                >
-                                  <Pencil className="size-4" />
-                                  编辑
-                                </Button>
-                                {voice.overridden ? (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => void handleReset(provider.providerId, voice.id)}
-                                  >
-                                    <RotateCcw className="size-4" />
-                                    恢复预设
-                                  </Button>
-                                ) : null}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                        {hidden.map((voice) => (
-                          <TableRow key={voice.id} className="opacity-50">
-                            <TableCell className="max-w-64 truncate font-mono text-xs">
-                              {voice.id}
-                            </TableCell>
-                            <TableCell className="font-medium">
-                              {voice.name}
-                              <Badge variant="destructive" className="ml-2">
-                                已隐藏
-                              </Badge>
-                            </TableCell>
-                            <TableCell>—</TableCell>
-                            <TableCell>—</TableCell>
-                            <TableCell>
-                              {voice.isCustomAddition ? (
-                                <Badge variant="secondary">自定义</Badge>
-                              ) : (
-                                <span className="text-muted-foreground text-xs">预设</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => openEdit(provider, voice)}
-                                >
-                                  <Pencil className="size-4" />
-                                  编辑
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => void handleReset(provider.providerId, voice.id)}
-                                >
-                                  <RotateCcw className="size-4" />
-                                  恢复预设
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-          );
-        })}
-      </Tabs>
+      {(data?.providers ?? []).map((provider) => {
+        const visible = provider.voices.filter((voice) => !voice.hidden);
+        const hidden = provider.voices.filter((voice) => voice.hidden);
+        return (
+          <Card key={provider.providerId}>
+            <CardHeader className="flex-row items-center justify-between space-y-0">
+              <div>
+                <CardTitle className="text-base">{provider.providerName} · 音色表</CardTitle>
+                <CardDescription>
+                  显示名与性别影响选择器展示及老师头像联动；隐藏 =
+                  不再出现在任何选择器（已绑定课程不受影响）
+                </CardDescription>
+              </div>
+              <Button size="sm" onClick={() => openCreate(provider)}>
+                <Plus className="size-4" />
+                新增音色
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {visible.length + hidden.length === 0 ? (
+                <p className="text-muted-foreground py-6 text-center text-sm">
+                  该 Provider 无预置音色。
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Voice ID</TableHead>
+                      <TableHead>显示名称</TableHead>
+                      <TableHead>性别</TableHead>
+                      <TableHead>语言</TableHead>
+                      <TableHead>来源</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {visible.map((voice) => (
+                      <TableRow key={voice.id}>
+                        <TableCell className="max-w-64 truncate font-mono text-xs">
+                          {voice.id}
+                        </TableCell>
+                        <TableCell className="font-medium">{voice.name}</TableCell>
+                        <TableCell>
+                          {voice.gender ? (GENDER_LABELS[voice.gender] ?? voice.gender) : '—'}
+                        </TableCell>
+                        <TableCell className="text-xs">{voice.language ?? '—'}</TableCell>
+                        <TableCell>
+                          {voice.isCustomAddition ? (
+                            <Badge variant="secondary">自定义</Badge>
+                          ) : voice.overridden ? (
+                            <Badge variant="outline">已覆盖</Badge>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">预设</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEdit(provider, voice)}
+                            >
+                              <Pencil className="size-4" />
+                              编辑
+                            </Button>
+                            {voice.overridden ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => void handleReset(provider.providerId, voice.id)}
+                              >
+                                <RotateCcw className="size-4" />
+                                恢复预设
+                              </Button>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {hidden.map((voice) => (
+                      <TableRow key={voice.id} className="opacity-50">
+                        <TableCell className="max-w-64 truncate font-mono text-xs">
+                          {voice.id}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {voice.name}
+                          <Badge variant="destructive" className="ml-2">
+                            已隐藏
+                          </Badge>
+                        </TableCell>
+                        <TableCell>—</TableCell>
+                        <TableCell>—</TableCell>
+                        <TableCell>
+                          {voice.isCustomAddition ? (
+                            <Badge variant="secondary">自定义</Badge>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">预设</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEdit(provider, voice)}
+                            >
+                              <Pencil className="size-4" />
+                              编辑
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => void handleReset(provider.providerId, voice.id)}
+                            >
+                              <RotateCcw className="size-4" />
+                              恢复预设
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })}
 
       <Dialog open={editor.open} onOpenChange={(open) => !open && setEditor(EMPTY_EDITOR)}>
         <DialogContent className="sm:max-w-lg">

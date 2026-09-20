@@ -15,7 +15,7 @@
  * Response: { success: boolean, result?: ImageGenerationResult, error?: string }
  */
 
-import { NextRequest } from 'next/server';
+import { NextRequest, type NextResponse } from 'next/server';
 import { recordGenerationUsage } from '@/lib/server/usage-storage';
 import { generateImage, IMAGE_PROVIDERS } from '@/lib/media/image-providers';
 import {
@@ -29,8 +29,8 @@ import {
 import type { ImageProviderId, ImageGenerationOptions } from '@/lib/media/types';
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { withGenerationTrace, type GenerationTraceContext } from '@/lib/server/generation-trace';
 import { quotaGateForRequest } from '@/lib/admin/quota';
-import { readAuthAwareOwnerId } from '@/lib/server/agent-runtime/auth-owner';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
 import { resolveImageSize } from '@/lib/server/image-sizing';
 
@@ -43,14 +43,23 @@ const log = createLogger('ImageGeneration API');
 // (Self-hosted Node servers ignore this value entirely.)
 export const maxDuration = 300;
 
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  return withGenerationTrace(request, 'image', (trace) => handleImageRequest(request, trace));
+}
+
+async function handleImageRequest(
+  request: NextRequest,
+  trace: GenerationTraceContext,
+): Promise<NextResponse> {
   // Quota gate: a no-op unless enforcement is double-switched on (env flag +
   // console policy). See lib/admin/quota.ts.
   const quotaGate = await quotaGateForRequest(request);
   if (quotaGate) return quotaGate;
 
   try {
-    const body = (await request.json()) as ImageGenerationOptions;
+    const body = (await request.json()) as ImageGenerationOptions & { stageId?: string };
+    // The client already sends the owning course's id — trace per-course timelines.
+    trace.stageId = typeof body.stageId === 'string' ? body.stageId : undefined;
 
     if (!body.prompt) {
       return apiError('MISSING_REQUIRED_FIELD', 400, 'Missing prompt');
@@ -98,6 +107,8 @@ export async function POST(request: NextRequest) {
     // first pinned entry is the managed default; unmanaged providers use the
     // client header directly.
     const model = resolveImageModel(providerId, clientModel);
+    trace.providerId = providerId;
+    trace.modelId = model;
     // Workflow-based providers (e.g. comfyui-image) have no model catalog and
     // need no model; everyone else must resolve one.
     if (!model && provider?.models && provider.models.length > 0) {
@@ -123,7 +134,9 @@ export async function POST(request: NextRequest) {
       providerId,
       modelId: model,
       quantity: 1,
-      actor: { ownerId: await readAuthAwareOwnerId(request) },
+      // Reuse the trace's single owner resolution; stageId finally lands in
+      // the usage ledger too.
+      actor: { ownerId: await trace.ownerId, stageId: trace.stageId },
     });
 
     return apiSuccess({ result });

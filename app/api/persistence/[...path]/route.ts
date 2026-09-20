@@ -26,6 +26,7 @@ import {
 import { readStageMeta } from '@/lib/persistence/stage-meta';
 import { APP_RUNTIME_PAYLOAD_VALIDATORS } from '@/lib/runtime/payload-validators';
 import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
+import { getCourseCreationGrant } from '@/lib/server/course-creation-gate';
 
 export const runtime = 'nodejs';
 
@@ -345,6 +346,31 @@ export async function handlePersistenceRequest(
         );
         for (const [name, value] of responseHeaders.entries()) response.headers.append(name, value);
         return response;
+      }
+      // Course creation is also grant-bound: the account needs the admin
+      // switch AND live-course headroom. Checked only for genuinely NEW
+      // stages — `PUT /documents/:id` is classified `create` even when it
+      // re-saves an existing document (incremental generation saves do exactly
+      // that), and blocking those would cut a course off mid-generation the
+      // moment its own creation filled the quota.
+      if (action.kind === 'create' && ownerId.startsWith('user:')) {
+        const { pool } = await getServerPersistenceProvider(connectionString, deps.poolFactory);
+        const existing = await pool.query(
+          'SELECT 1 FROM document_stages WHERE id = $1',
+          [action.stageId],
+        );
+        if (existing.rows.length === 0) {
+          const grant = await getCourseCreationGrant(ownerId);
+          if (!grant.allowed) {
+            const response =
+              grant.reason === 'quota'
+                ? jsonError(403, 'COURSE_QUOTA_EXCEEDED', '自制课程数量已达上限')
+                : jsonError(403, 'COURSE_CREATION_FORBIDDEN', '没有制作课程的权限');
+            for (const [name, value] of responseHeaders.entries())
+              response.headers.append(name, value);
+            return response;
+          }
+        }
       }
       let access: DocumentAccess = 'allow';
       if (path === '/documents' || path.startsWith('/documents/')) {

@@ -7,7 +7,9 @@
  *
  *  - logged in → the server account (`user_accounts`) is authoritative: the
  *    store is hydrated from /api/auth/me on load and on every
- *    `openmaic:auth-changed`, and edits are pushed up by the store's setters;
+ *    `openmaic:auth-changed`, and edits are pushed up by the store's setters
+ *    (the account's 真实姓名/工号 rides along as `accountName`, the fallback
+ *    profile surfaces show while no AI 昵称 is set);
  *  - anonymous / pure-browser mode → the local KV-persisted values stand
  *    exactly as before accounts existed;
  *  - first contact with an account that has no personalization yet → this
@@ -18,6 +20,7 @@
  */
 import { useEffect } from 'react';
 
+import { fetchAuthMe } from '@/lib/auth/auth-me-client';
 import {
   AVATAR_OPTIONS,
   pushServerProfilePatch,
@@ -31,19 +34,17 @@ export function AccountProfileSync(): null {
 
     const sync = async () => {
       let me: { user?: ServerProfile } | null = null;
-      try {
-        const res = await fetch('/api/auth/me');
-        if (!res.ok) {
-          // 401 (no session) or 5xx: local values stay authoritative.
-          if (!cancelled) useUserProfileStore.getState().markAnonymous();
-          return;
-        }
-        me = (await res.json()) as { user?: ServerProfile };
-      } catch {
-        // Network hiccup: keep whatever the store currently holds; the next
-        // auth-changed (or a later page load) re-runs the reconciliation.
+      // Shared cache: the home page and site header read the same response
+      // (invalidated by openmaic:auth-changed, which also re-runs this sync).
+      const snapshot = await fetchAuthMe<{ user?: ServerProfile }>();
+      if (!snapshot.ok) {
+        // 401 (no session) or network failure: local values stay
+        // authoritative; the next auth-changed (or a later page load)
+        // re-runs the reconciliation.
+        if (!cancelled && snapshot.status !== 0) useUserProfileStore.getState().markAnonymous();
         return;
       }
+      me = snapshot.body;
       if (cancelled || !me?.user) return;
 
       const store = useUserProfileStore.getState();
@@ -57,7 +58,7 @@ export function AccountProfileSync(): null {
       }
       // Unpersonalized account: adopt this browser's local profile once so a
       // pre-account user keeps their avatar/nickname after their first login.
-      store.bindToAccount();
+      store.bindToAccount(me.user.displayName?.trim() || me.user.username || null);
       pushServerProfilePatch({
         avatarUrl: store.avatar,
         nickname: store.nickname,

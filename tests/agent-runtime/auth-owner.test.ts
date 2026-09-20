@@ -32,6 +32,8 @@ const SESSION = {
   avatarUrl: null,
   nickname: null,
   bio: null,
+  canCreateCourses: false,
+  courseCreationQuota: 3,
 };
 
 beforeEach(() => {

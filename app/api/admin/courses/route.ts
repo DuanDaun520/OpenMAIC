@@ -69,6 +69,7 @@ interface ListRow extends Record<string, unknown> {
   outline_generation_complete: string | null;
   generation_heartbeat_at: number | null;
   tags: { id: string; name: string }[];
+  user_deleted_at: Date | string | null;
 }
 
 /** The shared SELECT/WHERE of the list and its count — kept in one string so
@@ -114,7 +115,12 @@ export async function GET(request: Request) {
 
   const pool = await getAdminPool();
   const params: unknown[] = [];
-  const where: string[] = [`COALESCE(m.deleted_at IS NULL, TRUE)`];
+  // Base predicate: tombstones stay out of the default view, but the explicit
+  // 用户已删除 filter flips the list to show EXACTLY those soft-deleted rows
+  // (the user's delete is a mark, not a removal — admins must still see them).
+  const where: string[] = [
+    status === 'userDeleted' ? `m.deleted_at IS NOT NULL` : `COALESCE(m.deleted_at IS NULL, TRUE)`,
+  ];
   if (query) {
     params.push(`%${query}%`);
     where.push(`s.name ILIKE $${params.length}`);
@@ -154,6 +160,7 @@ export async function GET(request: Request) {
             m.generation_complete,
             o.data ->> 'generationComplete' AS outline_generation_complete,
             m.generation_heartbeat_at,
+            m.deleted_at AS user_deleted_at,
             tags.tags AS tags
      ${LIST_SELECT}
      ${whereSql}
@@ -191,6 +198,7 @@ export async function GET(request: Request) {
         now,
       ),
       tags: row.tags,
+      user_deleted_at: row.user_deleted_at ?? null,
     })),
     total: Number(total.rows[0]?.count ?? 0),
     page,

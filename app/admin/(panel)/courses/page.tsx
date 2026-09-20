@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
+  Activity,
   BookOpen,
   ExternalLink,
   Home,
@@ -69,6 +70,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { coverGradient } from '@/lib/utils/cover-gradient';
 
 interface CourseRow {
@@ -88,6 +97,8 @@ interface CourseRow {
   cover_url: string | null;
   generation_status: 'completed' | 'generating' | 'failed';
   tags: { id: string; name: string }[];
+  /** 用户主动软删除的时间（墓碑）；null = 未删除。The rows survive by design. */
+  user_deleted_at: string | null;
 }
 
 interface CategoryRow {
@@ -170,6 +181,8 @@ export default function AdminCoursesPage() {
   const [editing, setEditing] = useState<CourseRow | null>(null);
   /** Delete confirmation: the course about to be hard-deleted with its media. */
   const [deleteTarget, setDeleteTarget] = useState<CourseRow | null>(null);
+  /** 生成过程 drill-down: the course whose generation call timeline is shown. */
+  const [traceTarget, setTraceTarget] = useState<CourseRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -344,6 +357,7 @@ export default function AdminCoursesPage() {
               <SelectItem value="published">已推荐</SelectItem>
               <SelectItem value="draft">未推荐</SelectItem>
               <SelectItem value="archived">已归档</SelectItem>
+              <SelectItem value="userDeleted">用户已删除</SelectItem>
             </SelectContent>
           </Select>
           <Select
@@ -408,6 +422,7 @@ export default function AdminCoursesPage() {
                   busy={busyStageId === course.id}
                   onOpen={() => void openCourse(course)}
                   onEdit={() => setEditing(course)}
+                  onTrace={() => setTraceTarget(course)}
                   onTags={() =>
                     setTagAssign({ course, selected: course.tags.map((tag) => tag.id) })
                   }
@@ -576,6 +591,8 @@ export default function AdminCoursesPage() {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <GenerationTraceDialog course={traceTarget} onClose={() => setTraceTarget(null)} />
     </div>
   );
 }
@@ -587,6 +604,7 @@ function CourseCard({
   busy,
   onOpen,
   onEdit,
+  onTrace,
   onTags,
   onCuration,
   onCategory,
@@ -597,6 +615,8 @@ function CourseCard({
   busy: boolean;
   onOpen: () => void;
   onEdit: () => void;
+  /** 生成过程 — the generation call timeline drill-down. */
+  onTrace: () => void;
   onTags: () => void;
   /** 推荐/首页 curation — the verb is pre-computed by the caller. */
   onCuration: (action: 'feature' | 'unfeature' | 'publish' | 'draft') => void;
@@ -629,6 +649,15 @@ function CourseCard({
               已上首页
             </Badge>
           ) : null}
+          {course.user_deleted_at ? (
+            <Badge
+              variant="outline"
+              className="gap-1 border-slate-400/60 bg-slate-600/90 text-[10px] text-white shadow-sm backdrop-blur"
+            >
+              <Trash2 className="size-3" />
+              用户已删除
+            </Badge>
+          ) : null}
         </div>
         <div className="absolute top-1.5 right-1.5">
           <DropdownMenu>
@@ -659,6 +688,10 @@ function CourseCard({
               <DropdownMenuItem className="gap-2" onClick={onTags}>
                 <Tags className="size-4" />
                 设置标签
+              </DropdownMenuItem>
+              <DropdownMenuItem className="gap-2" onClick={onTrace}>
+                <Activity className="size-4" />
+                生成过程
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -766,6 +799,234 @@ function CourseCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ─── 生成过程 — the course's generation-call timeline (generation_trace) ──
+const TRACE_STEP_LABELS: Record<string, string> = {
+  'scene-content': '内容生成',
+  'scene-actions': '动作生成',
+  tts: '语音合成',
+  image: '图片生成',
+  video: '视频生成',
+};
+
+/** Locale-neutral duration: 823ms / 12.4s / 4m05s. */
+function formatTraceMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m${String(Math.round(seconds - minutes * 60)).padStart(2, '0')}s`;
+}
+
+interface TraceRow {
+  id: number;
+  createdAt: string;
+  step: string;
+  page: number | null;
+  providerId: string | null;
+  modelId: string | null;
+  durationMs: number;
+  status: string;
+  errorCode: string | null;
+  errorSnippet: string | null;
+}
+
+interface TraceStepSummary {
+  step: string;
+  calls: number;
+  errors: number;
+  avgMs: number;
+  totalMs: number;
+}
+
+interface TraceResponse {
+  success: boolean;
+  stageId: string;
+  rows: TraceRow[];
+  summary: {
+    steps: TraceStepSummary[];
+    totalCalls: number;
+    totalErrors: number;
+    firstCallAt: string | null;
+    lastCallAt: string | null;
+  };
+}
+
+function GenerationTraceDialog({
+  course,
+  onClose,
+}: {
+  course: CourseRow | null;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [data, setData] = useState<TraceResponse | null>(null);
+
+  // Refetch on every open — a course inspected mid-generation shows fresh rows.
+  useEffect(() => {
+    if (!course) return;
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    setData(null);
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/admin/generation-trace?stageId=${encodeURIComponent(course.id)}`,
+        );
+        const body = await response.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!response.ok) {
+          setError(body.error || '加载失败');
+          return;
+        }
+        setData(body as TraceResponse);
+      } catch {
+        if (!cancelled) setError('网络错误');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [course]);
+
+  const maxStepMs = data ? Math.max(1, ...data.summary.steps.map((s) => s.totalMs)) : 1;
+
+  const formatSpan = (iso: string | null): string =>
+    iso ? new Date(iso).toLocaleString('zh-CN', { hour12: false }) : '—';
+
+  return (
+    <Dialog open={course !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Activity className="size-4" />
+            生成过程{course ? `：${course.name}` : ''}
+          </DialogTitle>
+          <DialogDescription>
+            每次生成调用的耗时与成败（内容/动作/语音/图片/视频，记录保留约 30 天）
+          </DialogDescription>
+        </DialogHeader>
+        {loading ? (
+          <div className="flex justify-center py-16">
+            <Loader2 className="text-muted-foreground size-6 animate-spin" />
+          </div>
+        ) : error ? (
+          <p className="text-destructive py-8 text-center text-sm">{error}</p>
+        ) : !data || data.rows.length === 0 ? (
+          <p className="text-muted-foreground py-8 text-center text-sm">
+            暂无生成调用记录（记录已过期、课程在本次部署前生成，或正在生成中可稍后再看）
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="rounded-lg border p-2.5">
+                <p className="text-muted-foreground text-[11px]">总调用</p>
+                <p className="tabular-nums text-lg font-semibold">{data.summary.totalCalls}</p>
+              </div>
+              <div className="rounded-lg border p-2.5">
+                <p className="text-muted-foreground text-[11px]">失败次数</p>
+                <p
+                  className={`tabular-nums text-lg font-semibold ${data.summary.totalErrors > 0 ? 'text-destructive' : ''}`}
+                >
+                  {data.summary.totalErrors}
+                </p>
+              </div>
+              <div className="rounded-lg border p-2.5">
+                <p className="text-muted-foreground text-[11px]">首次调用</p>
+                <p className="text-xs leading-5 font-medium">
+                  {formatSpan(data.summary.firstCallAt)}
+                </p>
+              </div>
+              <div className="rounded-lg border p-2.5">
+                <p className="text-muted-foreground text-[11px]">最近调用</p>
+                <p className="text-xs leading-5 font-medium">
+                  {formatSpan(data.summary.lastCallAt)}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2.5">
+              {data.summary.steps.map((step) => (
+                <div key={step.step}>
+                  <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                    <span className="shrink-0 font-medium">
+                      {TRACE_STEP_LABELS[step.step] ?? step.step}
+                      {step.errors > 0 ? (
+                        <span className="text-destructive">（失败 {step.errors}）</span>
+                      ) : null}
+                    </span>
+                    <span className="text-muted-foreground tabular-nums">
+                      {step.calls} 次 · 平均 {formatTraceMs(step.avgMs)} · 合计{' '}
+                      {formatTraceMs(step.totalMs)}
+                    </span>
+                  </div>
+                  <div className="bg-muted h-2 overflow-hidden rounded-full">
+                    <div
+                      className="h-full rounded-full bg-violet-500"
+                      style={{ width: `${(step.totalMs / maxStepMs) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>时间</TableHead>
+                  <TableHead>步骤</TableHead>
+                  <TableHead>页</TableHead>
+                  <TableHead className="hidden sm:table-cell">模型</TableHead>
+                  <TableHead>耗时</TableHead>
+                  <TableHead>状态</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.rows.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="tabular-nums whitespace-nowrap text-xs">
+                      {new Date(row.createdAt).toLocaleString('zh-CN', {
+                        hour12: false,
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                      })}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {TRACE_STEP_LABELS[row.step] ?? row.step}
+                    </TableCell>
+                    <TableCell className="tabular-nums text-xs">{row.page ?? '—'}</TableCell>
+                    <TableCell
+                      className="hidden max-w-40 truncate font-mono text-[11px] sm:table-cell"
+                      title={row.modelId ? `${row.providerId}:${row.modelId}` : undefined}
+                    >
+                      {row.modelId ? `${row.providerId}:${row.modelId}` : '—'}
+                    </TableCell>
+                    <TableCell className="tabular-nums text-xs">
+                      {formatTraceMs(row.durationMs)}
+                    </TableCell>
+                    <TableCell
+                      className={`text-xs ${row.status === 'ok' ? 'text-emerald-600' : 'text-destructive'}`}
+                      title={row.errorSnippet ?? undefined}
+                    >
+                      {row.status === 'ok' ? '成功' : '失败'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

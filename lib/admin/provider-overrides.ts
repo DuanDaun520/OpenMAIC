@@ -38,6 +38,11 @@ export interface ProviderConfigRow {
   capability: AdminCapability;
   providerId: string;
   apiKeyCipher: string | null;
+  /**
+   * Extra credentials that don't fit the single api_key column (AliDocMind's
+   * AccessKey pair), as field name → cipher. Encrypted like `apiKeyCipher`.
+   */
+  extraSecrets?: Record<string, string> | null;
   baseUrl: string | null;
   models: string[];
   proxy: string | null;
@@ -65,18 +70,21 @@ async function loadOverlay(): Promise<void> {
     capability: string;
     provider_id: string;
     api_key_cipher: string | null;
+    extra_secrets: Record<string, string> | null;
     base_url: string | null;
     models: string[] | null;
     proxy: string | null;
     enabled: boolean;
     updated_by: string | null;
     updated_at: Date;
-  }>(`SELECT capability, provider_id, api_key_cipher, base_url, models, proxy, enabled, updated_by, updated_at
+  }>(`SELECT capability, provider_id, api_key_cipher, extra_secrets, base_url, models, proxy, enabled, updated_by, updated_at
        FROM provider_configs`);
   const rows: ProviderConfigRow[] = result.rows.map((row) => ({
     capability: row.capability as AdminCapability,
     providerId: row.provider_id,
     apiKeyCipher: row.api_key_cipher,
+    extraSecrets:
+      row.extra_secrets && typeof row.extra_secrets === 'object' ? row.extra_secrets : null,
     baseUrl: row.base_url,
     models: Array.isArray(row.models) ? row.models : [],
     proxy: row.proxy,
@@ -93,6 +101,17 @@ async function loadOverlay(): Promise<void> {
     return;
   }
   snapshot = { version: (snapshot?.version ?? 0) + 1, loadedAt: Date.now(), rows };
+  if (rows.length === 0) {
+    // Config-in-database bootstrap: an empty table on a deployment that still
+    // has env/YAML provider config means the one-time seed has not run. The
+    // dynamic import keeps this module free of a static dependency cycle
+    // (seed → provider-config → this module).
+    void import('@/lib/server/provider-config-persist')
+      .then((persist) => persist.maybeSeedProviderConfigs())
+      .catch((error) => {
+        console.error('[admin] provider-config bootstrap seed failed to run', error);
+      });
+  }
 }
 
 /**

@@ -14,6 +14,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
+import { fetchAuthMe } from '@/lib/auth/auth-me-client';
 import { SiteHeader } from '@/components/site-header/site-header';
 import { createLogger } from '@/lib/logger';
 import { Button } from '@/components/ui/button';
@@ -50,6 +51,7 @@ import { hasUsableLLMProvider } from '@/lib/store/settings-validation';
 import { useUserProfileStore, AVATAR_OPTIONS } from '@/lib/store/user-profile';
 import { resizeAvatarToDataUrl } from '@/lib/utils/avatar-upload';
 import { useTeacherAvatarVoiceSync } from '@/lib/orchestration/registry/teacher-avatar';
+import type { CourseCreationGrant } from '@/lib/server/course-creation-gate';
 import { toast } from 'sonner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useDraftCache } from '@/lib/hooks/use-draft-cache';
@@ -125,6 +127,29 @@ function HomePage() {
   useEffect(() => {
     if (workbenchEntryEnabled) router.prefetch('/workspace');
   }, [router, workbenchEntryEnabled]);
+  // Course-creation grant (admin-managed switch + quota): a known-denied grant
+  // keeps the send button grayed and shows the amber notice beside the
+  // web-search pill. `null` (signed out / probe failed) does NOT pre-gray —
+  // the anonymous case is handled by the click-time login gate instead.
+  const [creationGrant, setCreationGrant] = useState<CourseCreationGrant | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const probe = () => {
+      // Shared with the layout's profile sync and the site header (same
+      // response, one request per load; auth-changed invalidates).
+      void fetchAuthMe<{ user?: { courseCreation?: CourseCreationGrant } }>()
+        .then((snapshot) => {
+          if (!cancelled) setCreationGrant(snapshot.body?.user?.courseCreation ?? null);
+        })
+        .catch(() => undefined);
+    };
+    probe();
+    window.addEventListener('openmaic:auth-changed', probe);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('openmaic:auth-changed', probe);
+    };
+  }, []);
   const [form, setForm] = useState<FormState>(initialFormState);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<
@@ -289,6 +314,23 @@ function HomePage() {
         useAuthModalStore.getState().openLogin('/');
         return;
       }
+      // Grant backstop for a stale mount-time probe (e.g. the admin just
+      // flipped the switch or the quota filled elsewhere).
+      if (auth.ok) {
+        const body = (await auth.json().catch(() => null)) as {
+          user?: { courseCreation?: CourseCreationGrant };
+        } | null;
+        const grant = body?.user?.courseCreation ?? null;
+        setCreationGrant(grant);
+        if (grant && !grant.allowed) {
+          toast.error(
+            grant.reason === 'quota'
+              ? t('toolbar.creationQuotaExceeded', { n: grant.limit })
+              : t('toolbar.creationForbidden'),
+          );
+          return;
+        }
+      }
     } catch {
       // Network hiccup: fail open here — the generation pipeline surfaces its
       // own errors, and a flaky auth probe must not block a working session.
@@ -398,7 +440,17 @@ function HomePage() {
     }
   };
 
-  const canGenerate = !!form.requirement.trim() && hasUsableProvider;
+  // A known-denied course-creation grant keeps the button grayed for good —
+  // the amber toolbar notice carries the reason (permission or quota).
+  const creationBlocked = creationGrant !== null && !creationGrant.allowed;
+  const creationBlockHint =
+    creationGrant && !creationGrant.allowed
+      ? creationGrant.reason === 'quota'
+        ? t('toolbar.creationQuotaExceeded', { n: creationGrant.limit })
+        : t('toolbar.creationForbidden')
+      : undefined;
+
+  const canGenerate = !!form.requirement.trim() && hasUsableProvider && !creationBlocked;
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -515,6 +567,7 @@ function HomePage() {
                   onCourseMaterialRemove={removeCourseMaterial}
                   onPdfError={setError}
                   materialsLocked={preparingGenerate}
+                  creationBlockHint={creationBlockHint}
                 />
               </div>
 
@@ -686,6 +739,7 @@ function GreetingBar() {
   const avatar = useUserProfileStore((s) => s.avatar);
   const nickname = useUserProfileStore((s) => s.nickname);
   const bio = useUserProfileStore((s) => s.bio);
+  const accountName = useUserProfileStore((s) => s.accountName);
   const setAvatar = useUserProfileStore((s) => s.setAvatar);
   const setNickname = useUserProfileStore((s) => s.setNickname);
   const setBio = useUserProfileStore((s) => s.setBio);
@@ -693,20 +747,23 @@ function GreetingBar() {
   const [open, setOpen] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
-  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(true);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
-  const displayName = nickname || t('profile.defaultNickname');
+  // Same resolution as the site header: AI 昵称, else the logged-in account's
+  // 真实姓名/工号 (synced by account-profile-sync), else the generic 同学 —
+  // so the greeting always reads as the current user.
+  const nameFallback = accountName || t('profile.defaultNickname');
+  const displayName = nickname || nameFallback;
 
-  // The dialog owns outside-click dismissal; only the in-place editors
-  // (name input, avatar picker) need resetting on close.
+  // The dialog owns outside-click dismissal; the avatar picker deliberately
+  // starts EXPANDED on every open (头像选择默认展开), so only the in-place
+  // name editor needs resetting on close.
   const handleDialogOpenChange = (next: boolean) => {
     setOpen(next);
-    if (!next) {
-      setEditingName(false);
-      setAvatarPickerOpen(false);
-    }
+    if (next) setAvatarPickerOpen(true);
+    else setEditingName(false);
   };
 
   const startEditName = () => {
@@ -822,7 +879,7 @@ function GreetingBar() {
                       }}
                       onBlur={commitName}
                       maxLength={20}
-                      placeholder={t('profile.defaultNickname')}
+                      placeholder={nameFallback}
                       className="flex-1 min-w-0 h-6 bg-transparent border-b border-border/80 text-[13px] font-semibold text-foreground outline-none placeholder:text-muted-foreground/40"
                     />
                     <button

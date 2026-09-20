@@ -61,6 +61,12 @@ interface SceneContentResult {
   error?: string;
   errorCode?: string;
   statusCode?: number;
+  /**
+   * Wall-clock of the fetch itself (including any retries), measured from the
+   * moment this function is invoked — in the pipelined path that is when a
+   * concurrency slot frees, so this is the true HTTP time, not pipeline wait.
+   */
+  durationMs?: number;
 }
 
 interface SceneActionsResult {
@@ -70,6 +76,8 @@ interface SceneActionsResult {
   error?: string;
   errorCode?: string;
   statusCode?: number;
+  /** Wall-clock of the fetch itself (including any retries). */
+  durationMs?: number;
 }
 
 type ClientRetryOptions<T> = Partial<
@@ -236,6 +244,19 @@ function pageParams(outline: SceneOutline): { order: number; title: string } {
   return { order: outline.order, title: outline.title };
 }
 
+/**
+ * Locale-neutral phase duration for the generationLog.m.* {{duration}} params
+ * (messages are pre-localized at capture time, so the unit strings stay
+ * language-independent): 823ms / 12.3s / 4m05s.
+ */
+export function formatPhaseDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m${String(Math.round(seconds - minutes * 60)).padStart(2, '0')}s`;
+}
+
 function errorMeta(error: unknown): Pick<SceneContentResult, 'errorCode' | 'statusCode'> {
   if (!error || typeof error !== 'object') return {};
   const record = error as { errorCode?: unknown; statusCode?: unknown };
@@ -266,8 +287,9 @@ export async function fetchSceneContent(
   signal?: AbortSignal,
   retryOptions?: ClientRetryOptions<SceneContentResult>,
 ): Promise<SceneContentResult> {
+  const startedAt = Date.now();
   try {
-    return await withGenerationRetry(
+    const result = await withGenerationRetry(
       async () => {
         const response = await fetch('/api/generate/scene-content', {
           method: 'POST',
@@ -293,6 +315,7 @@ export async function fetchSceneContent(
         signal,
       },
     );
+    return { ...result, durationMs: Date.now() - startedAt };
   } catch (error) {
     if (isAbortError(error)) throw error;
     log.warn(
@@ -302,6 +325,7 @@ export async function fetchSceneContent(
     return {
       success: false,
       error: describeGenerationError(error, 'Content generation failed'),
+      durationMs: Date.now() - startedAt,
       ...errorMeta(error),
     };
   }
@@ -322,8 +346,9 @@ export async function fetchSceneActions(
   signal?: AbortSignal,
   retryOptions?: ClientRetryOptions<SceneActionsResult>,
 ): Promise<SceneActionsResult> {
+  const startedAt = Date.now();
   try {
-    return await withGenerationRetry(
+    const result = await withGenerationRetry(
       async () => {
         const response = await fetch('/api/generate/scene-actions', {
           method: 'POST',
@@ -349,6 +374,7 @@ export async function fetchSceneActions(
         signal,
       },
     );
+    return { ...result, durationMs: Date.now() - startedAt };
   } catch (error) {
     if (isAbortError(error)) throw error;
     log.warn(
@@ -358,6 +384,7 @@ export async function fetchSceneActions(
     return {
       success: false,
       error: describeGenerationError(error, 'Actions generation failed'),
+      durationMs: Date.now() - startedAt,
       ...errorMeta(error),
     };
   }
@@ -483,6 +510,9 @@ export async function generateAndStoreTTS(
           body: JSON.stringify({
             text,
             audioId: requestId,
+            // Server-side generation-trace correlation (per-course timeline);
+            // dropped by JSON.stringify when undefined (browser-native clips).
+            stageId,
             ttsProviderId,
             ttsModelId,
             ttsVoice,
@@ -829,6 +859,10 @@ const RUN: {
   mediaAbort: AbortController | null;
   fetchAbort: AbortController | null;
   lastParams: GenerationParams | null;
+  /** Start of the newest generateRemaining run — the retry path's completed
+   *  entry reports its elapsed as the deck's 总用时 (a lone retry that finishes
+   *  the deck would otherwise pass off one page's time as the whole deck's). */
+  startedAt: number | null;
 } = {
   stageId: null,
   aborting: false,
@@ -836,6 +870,7 @@ const RUN: {
   mediaAbort: null,
   fetchAbort: null,
   lastParams: null,
+  startedAt: null,
 };
 
 /** Token of the run that currently owns generation-status presentation. */
@@ -976,6 +1011,10 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
         'start',
         getClientTranslation('generationLog.m.start', { count: pending.length }),
       );
+      // Whole-run clock, reported on the completion entry ("总用时"). On a
+      // resumed run this measures the resumed run only — truthful for that run.
+      const runStartedAt = Date.now();
+      RUN.startedAt = runStartedAt;
       // Liveness: assert this run immediately, then on the interval below for
       // as long as it lasts. 'start' also clears the previously recorded
       // failure reason server-side (a retry invalidates it).
@@ -1106,6 +1145,11 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
             break;
           }
 
+          // This page's wall-clock contribution to the run. In parallel mode
+          // the content await is often instant (pre-warmed) — the per-phase
+          // entries below carry the real fetch durations instead.
+          const pageStartedAt = Date.now();
+
           store.getState().setCurrentGeneratingOrder(outline.order);
           logGeneration(
             stage.id,
@@ -1167,6 +1211,17 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
             break;
           }
 
+          logGeneration(
+            stage.id,
+            'info',
+            'content',
+            getClientTranslation('generationLog.m.contentDone', {
+              ...pageParams(outline),
+              duration: formatPhaseDuration(contentResult.durationMs ?? 0),
+            }),
+            pageParams(outline),
+          );
+
           // Step 2: Generate actions + assemble scene
           options.onPhaseChange?.('actions', outline);
           logGeneration(
@@ -1191,6 +1246,16 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
           );
 
           if (actionsResult.success && actionsResult.scene) {
+            logGeneration(
+              stage.id,
+              'info',
+              'actions',
+              getClientTranslation('generationLog.m.actionsDone', {
+                ...pageParams(outline),
+                duration: formatPhaseDuration(actionsResult.durationMs ?? 0),
+              }),
+              pageParams(outline),
+            );
             const scene = actionsResult.scene;
             const settings = useSettingsStore.getState();
 
@@ -1203,6 +1268,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
                 settings.ttsProvidersConfig?.[settings.ttsProviderId],
               )
             ) {
+              const ttsStartedAt = Date.now();
               const ttsResult = await generateTTSForScene(
                 scene,
                 params.languageDirective || params.stageInfo.language,
@@ -1231,6 +1297,18 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
                 pausedByFailureOrAbort = true;
                 break;
               }
+              // Wall-clock across the scene's clips (client-orchestrated; the
+              // wall time IS the phase).
+              logGeneration(
+                stage.id,
+                'info',
+                'actions',
+                getClientTranslation('generationLog.m.ttsDone', {
+                  ...pageParams(outline),
+                  duration: formatPhaseDuration(Date.now() - ttsStartedAt),
+                }),
+                pageParams(outline),
+              );
             }
 
             // Epoch changed — stage switched, discard this scene
@@ -1246,7 +1324,10 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
               stage.id,
               'success',
               'scene-done',
-              getClientTranslation('generationLog.m.sceneDone', pageParams(outline)),
+              getClientTranslation('generationLog.m.sceneDone', {
+                ...pageParams(outline),
+                duration: formatPhaseDuration(Date.now() - pageStartedAt),
+              }),
               pageParams(outline),
             );
             options.onSceneGenerated?.(scene, outline.order);
@@ -1294,7 +1375,10 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
               stage.id,
               'success',
               'completed',
-              getClientTranslation('generationLog.m.completed', { count: outlines.length }),
+              getClientTranslation('generationLog.m.completed', {
+                count: outlines.length,
+                duration: formatPhaseDuration(Date.now() - runStartedAt),
+              }),
             );
             // Sidecar mirror: completed + no heartbeat/error left behind.
             sendGenerationComplete(stage.id);
@@ -1409,6 +1493,8 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
       const signal = abortController.signal;
 
       try {
+        // Whole-retry clock, reported on this outline's sceneDone entry.
+        const retryStartedAt = Date.now();
         // Step 1: Content
         const contentResult = await fetchSceneContent(
           {
@@ -1440,6 +1526,17 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
           sendGenerationPulse(stageId, 'error', contentError);
           return;
         }
+
+        logGeneration(
+          stageId,
+          'info',
+          'content',
+          getClientTranslation('generationLog.m.contentDone', {
+            ...pageParams(outline),
+            duration: formatPhaseDuration(contentResult.durationMs ?? 0),
+          }),
+          pageParams(outline),
+        );
 
         // Step 2: Actions
         const sortedScenes = [...store.getState().scenes].sort((a, b) => a.order - b.order);
@@ -1481,6 +1578,17 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
           return;
         }
 
+        logGeneration(
+          stageId,
+          'info',
+          'actions',
+          getClientTranslation('generationLog.m.actionsDone', {
+            ...pageParams(outline),
+            duration: formatPhaseDuration(actionsResult.durationMs ?? 0),
+          }),
+          pageParams(outline),
+        );
+
         // Step 3: TTS
         const settings = useSettingsStore.getState();
         if (
@@ -1491,6 +1599,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
             settings.ttsProvidersConfig?.[settings.ttsProviderId],
           )
         ) {
+          const ttsStartedAt = Date.now();
           const ttsResult = await generateTTSForScene(
             actionsResult.scene,
             params.languageDirective || params.stageInfo.language,
@@ -1512,6 +1621,16 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
             sendGenerationPulse(stageId, 'error', ttsError);
             return;
           }
+          logGeneration(
+            stageId,
+            'info',
+            'actions',
+            getClientTranslation('generationLog.m.ttsDone', {
+              ...pageParams(outline),
+              duration: formatPhaseDuration(Date.now() - ttsStartedAt),
+            }),
+            pageParams(outline),
+          );
         }
 
         if (store.getState().generationEpoch !== retryEpoch) {
@@ -1525,7 +1644,10 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
           stageId,
           'success',
           'scene-done',
-          getClientTranslation('generationLog.m.sceneDone', pageParams(outline)),
+          getClientTranslation('generationLog.m.sceneDone', {
+            ...pageParams(outline),
+            duration: formatPhaseDuration(Date.now() - retryStartedAt),
+          }),
           pageParams(outline),
         );
 
@@ -1548,6 +1670,8 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
               'completed',
               getClientTranslation('generationLog.m.completed', {
                 count: store.getState().outlines.length,
+                // The deck's 总用时 spans the whole run, not just this retry.
+                duration: formatPhaseDuration(Date.now() - (RUN.startedAt ?? retryStartedAt)),
               }),
             );
             sendGenerationComplete(stageId);

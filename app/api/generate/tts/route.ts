@@ -7,7 +7,7 @@
  * POST /api/generate/tts
  */
 
-import { NextRequest } from 'next/server';
+import { NextRequest, type NextResponse } from 'next/server';
 import {
   generateTTS,
   QwenTTSError,
@@ -27,8 +27,8 @@ import {
 import type { TTSProviderId } from '@/lib/audio/types';
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { withGenerationTrace, type GenerationTraceContext } from '@/lib/server/generation-trace';
 import { quotaGateForRequest } from '@/lib/admin/quota';
-import { readAuthAwareOwnerId } from '@/lib/server/agent-runtime/auth-owner';
 import { findUnsafeNetworkTargetError, validatePublicUrlForSSRF } from '@/lib/server/ssrf-guard';
 import { VOXCPM_AUTO_VOICE_ID, VOXCPM_TTS_PROVIDER_ID } from '@/lib/audio/voxcpm';
 import { QwenVoiceCloneError, qwenVoiceCloneErrorMessage } from '@/lib/audio/qwen-voice-clone';
@@ -38,7 +38,14 @@ const log = createLogger('TTS API');
 
 export const maxDuration = 30;
 
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  return withGenerationTrace(req, 'tts', (trace) => handleTtsRequest(req, trace));
+}
+
+async function handleTtsRequest(
+  req: NextRequest,
+  trace: GenerationTraceContext,
+): Promise<NextResponse> {
   // Quota gate: a no-op unless enforcement is double-switched on (env flag +
   // console policy). See lib/admin/quota.ts.
   const quotaGate = await quotaGateForRequest(req);
@@ -59,10 +66,14 @@ export async function POST(req: NextRequest) {
       ttsApiKey?: string;
       ttsBaseUrl?: string;
       ttsProviderOptions?: Record<string, unknown>;
+      stageId?: string;
     };
     ttsProviderId = body.ttsProviderId;
     ttsVoice = typeof body.ttsVoice === 'string' ? body.ttsVoice.trim() : undefined;
     audioId = body.audioId;
+    // Course correlation for the generation trace; clients that predate this
+    // field simply trace with a NULL stage (the row still aggregates globally).
+    trace.stageId = typeof body.stageId === 'string' ? body.stageId : undefined;
 
     // Validate required fields
     if (!text || !audioId || !ttsProviderId || !ttsVoice) {
@@ -138,6 +149,8 @@ export async function POST(req: NextRequest) {
     const qwenCloneVoice = ttsProviderId === 'qwen-tts' && isQwenCloneVoice(ttsVoice);
     const requestedSpeed = ttsSpeed ?? 1.0;
     const resolvedModelId = resolveTTSModel(ttsProviderId, ttsModelId, ttsVoice);
+    trace.providerId = ttsProviderId;
+    trace.modelId = resolvedModelId;
     const config = {
       providerId: ttsProviderId as TTSProviderId,
       modelId: resolvedModelId,
@@ -166,7 +179,10 @@ export async function POST(req: NextRequest) {
       providerId: ttsProviderId,
       modelId: config.modelId,
       quantity: text.length,
-      actor: { ownerId: await readAuthAwareOwnerId(req) },
+      // Reuse the trace's single owner resolution — a course's TTS burst is
+      // ~100 calls and must not repeat the session lookup each time — and let
+      // the usage ledger's stage dimension finally carry data.
+      actor: { ownerId: await trace.ownerId, stageId: trace.stageId },
     });
 
     // Convert to base64

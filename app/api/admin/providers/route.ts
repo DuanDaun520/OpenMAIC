@@ -58,11 +58,18 @@ function effectiveManagedIds(): Record<string, string[]> {
 }
 
 function toClientRow(row: ProviderConfigRow) {
+  // Masked tails for extra credentials (AliDocMind AK/SK) — same write-only
+  // treatment as the API key.
+  const extraSecretTails: Record<string, string | null> = {};
+  for (const [field, cipher] of Object.entries(row.extraSecrets ?? {})) {
+    extraSecretTails[field] = maskSecretTail(cipher);
+  }
   return {
     capability: row.capability,
     providerId: row.providerId,
     hasApiKey: !!row.apiKeyCipher,
     apiKeyTail: maskSecretTail(row.apiKeyCipher),
+    extraSecretTails,
     baseUrl: row.baseUrl,
     models: row.models,
     proxy: row.proxy,
@@ -100,11 +107,16 @@ interface ProviderPutBody {
   capability?: unknown;
   providerId?: unknown;
   apiKey?: unknown;
+  /** Extra credentials (AliDocMind AK/SK): field → string, same tri-state as apiKey. */
+  extraSecrets?: unknown;
   baseUrl?: unknown;
   models?: unknown;
   proxy?: unknown;
   enabled?: unknown;
 }
+
+/** Fields allowed in the extra_secrets column. */
+const EXTRA_SECRET_FIELDS = ['accessKeyId', 'accessKeySecret'] as const;
 
 export async function PUT(request: Request) {
   const guard = await requireAdmin(request, { mutation: true, minRole: 'admin' });
@@ -135,8 +147,11 @@ export async function PUT(request: Request) {
 
   const cap = capability as AdminCapability;
   const pool = await getAdminPool();
-  const existing = await pool.query<{ api_key_cipher: string | null }>(
-    'SELECT api_key_cipher FROM provider_configs WHERE capability = $1 AND provider_id = $2',
+  const existing = await pool.query<{
+    api_key_cipher: string | null;
+    extra_secrets: Record<string, string> | null;
+  }>(
+    'SELECT api_key_cipher, extra_secrets FROM provider_configs WHERE capability = $1 AND provider_id = $2',
     [cap, providerId],
   );
 
@@ -156,16 +171,41 @@ export async function PUT(request: Request) {
     return apiError('INVALID_REQUEST', 400, 'apiKey 必须是字符串');
   }
 
+  // Extra credentials follow the same tri-state per field: absent keeps the
+  // stored cipher, empty string clears it, a value encrypts.
+  const extraCiphers: Record<string, string> = { ...(existing.rows[0]?.extra_secrets ?? {}) };
+  if (body.extraSecrets !== undefined) {
+    if (typeof body.extraSecrets !== 'object' || body.extraSecrets === null) {
+      return apiError('INVALID_REQUEST', 400, 'extraSecrets 必须是对象');
+    }
+    for (const [field, value] of Object.entries(body.extraSecrets as Record<string, unknown>)) {
+      if (!(EXTRA_SECRET_FIELDS as readonly string[]).includes(field)) {
+        return apiError('INVALID_REQUEST', 400, `extraSecrets 不支持字段 ${field}`);
+      }
+      if (typeof value !== 'string') {
+        return apiError('INVALID_REQUEST', 400, 'extraSecrets 的值必须是字符串');
+      }
+      if (value === '') delete extraCiphers[field];
+      else
+        extraCiphers[field] = isAdminSecretConfigured()
+          ? encryptSecret(value)
+          : markPlainSecret(value);
+    }
+  }
+  const extraSecretsJson =
+    Object.keys(extraCiphers).length > 0 ? JSON.stringify(extraCiphers) : null;
+
   const baseUrl = typeof body.baseUrl === 'string' ? body.baseUrl.trim() || null : null;
   const proxy = typeof body.proxy === 'string' ? body.proxy.trim() || null : null;
   const enabled = body.enabled === undefined ? true : Boolean(body.enabled);
 
   await pool.query(
     `INSERT INTO provider_configs
-       (capability, provider_id, api_key_cipher, base_url, models, proxy, enabled, updated_by, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+       (capability, provider_id, api_key_cipher, extra_secrets, base_url, models, proxy, enabled, updated_by, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
      ON CONFLICT (capability, provider_id) DO UPDATE SET
        api_key_cipher = EXCLUDED.api_key_cipher,
+       extra_secrets = EXCLUDED.extra_secrets,
        base_url = EXCLUDED.base_url,
        models = EXCLUDED.models,
        proxy = EXCLUDED.proxy,
@@ -176,6 +216,7 @@ export async function PUT(request: Request) {
       cap,
       providerId,
       apiKeyCipher,
+      extraSecretsJson,
       baseUrl,
       JSON.stringify(models ?? []),
       proxy,
@@ -189,6 +230,7 @@ export async function PUT(request: Request) {
       capability: cap,
       providerId,
       apiKeyCipher,
+      extraSecrets: extraSecretsJson ? extraCiphers : null,
       baseUrl,
       models: models ?? [],
       proxy,

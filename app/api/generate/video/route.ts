@@ -16,7 +16,7 @@
  * Response: { success: boolean, result?: VideoGenerationResult, error?: string }
  */
 
-import { NextRequest } from 'next/server';
+import { NextRequest, type NextResponse } from 'next/server';
 import { recordGenerationUsage } from '@/lib/server/usage-storage';
 import { generateVideo, normalizeVideoOptions } from '@/lib/media/video-providers';
 import {
@@ -30,22 +30,32 @@ import {
 import type { VideoProviderId, VideoGenerationOptions } from '@/lib/media/types';
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { withGenerationTrace, type GenerationTraceContext } from '@/lib/server/generation-trace';
 import { quotaGateForRequest } from '@/lib/admin/quota';
-import { readAuthAwareOwnerId } from '@/lib/server/agent-runtime/auth-owner';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
 
 const log = createLogger('VideoGeneration API');
 
 export const maxDuration = 300;
 
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  return withGenerationTrace(request, 'video', (trace) => handleVideoRequest(request, trace));
+}
+
+async function handleVideoRequest(
+  request: NextRequest,
+  trace: GenerationTraceContext,
+): Promise<NextResponse> {
   // Quota gate: a no-op unless enforcement is double-switched on (env flag +
   // console policy). See lib/admin/quota.ts.
   const quotaGate = await quotaGateForRequest(request);
   if (quotaGate) return quotaGate;
 
   try {
-    const body = (await request.json()) as VideoGenerationOptions;
+    const body = (await request.json()) as VideoGenerationOptions & { stageId?: string };
+    // Course correlation for the generation trace; clients that predate this
+    // field simply trace with a NULL stage.
+    trace.stageId = typeof body.stageId === 'string' ? body.stageId : undefined;
 
     if (!body.prompt) {
       return apiError('MISSING_REQUIRED_FIELD', 400, 'Missing prompt');
@@ -92,6 +102,8 @@ export async function POST(request: NextRequest) {
     // first pinned entry is the managed default; unmanaged providers use the
     // client header directly.
     const model = resolveVideoModel(providerId, clientModel);
+    trace.providerId = providerId;
+    trace.modelId = model;
     if (!model) {
       return apiError(
         'MISSING_MODEL',
@@ -121,7 +133,9 @@ export async function POST(request: NextRequest) {
       providerId,
       modelId: model,
       quantity: result.duration,
-      actor: { ownerId: await readAuthAwareOwnerId(request) },
+      // Reuse the trace's single owner resolution; stageId finally lands in
+      // the usage ledger too.
+      actor: { ownerId: await trace.ownerId, stageId: trace.stageId },
     });
 
     return apiSuccess({ result });

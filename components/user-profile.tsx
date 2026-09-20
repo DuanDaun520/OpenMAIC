@@ -24,6 +24,7 @@ export function UserProfileCard() {
   const avatar = useUserProfileStore((s) => s.avatar);
   const nickname = useUserProfileStore((s) => s.nickname);
   const bio = useUserProfileStore((s) => s.bio);
+  const accountName = useUserProfileStore((s) => s.accountName);
   const setAvatar = useUserProfileStore((s) => s.setAvatar);
   const setNickname = useUserProfileStore((s) => s.setNickname);
   const setBio = useUserProfileStore((s) => s.setBio);
@@ -42,7 +43,9 @@ export function UserProfileCard() {
     if (editingName) nameInputRef.current?.focus();
   }, [editingName]);
 
-  const displayName = nickname || t('profile.defaultNickname');
+  // Same resolution as the site header: AI 昵称, else the logged-in account's
+  // 真实姓名/工号, else the generic 同学.
+  const displayName = nickname || accountName || t('profile.defaultNickname');
 
   const startEditName = () => {
     setNameDraft(nickname);
@@ -127,7 +130,7 @@ export function UserProfileCard() {
                 }}
                 onBlur={commitName}
                 maxLength={20}
-                placeholder={t('profile.defaultNickname')}
+                placeholder={accountName || t('profile.defaultNickname')}
                 className="flex-1 min-w-0 h-7 bg-transparent border-b-2 border-violet-400 dark:border-violet-500 text-sm font-semibold text-foreground outline-none placeholder:text-muted-foreground/40"
               />
               <button

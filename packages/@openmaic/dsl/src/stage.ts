@@ -90,8 +90,11 @@ export interface AgentVoiceConfig {
 /**
  * Generated agent configuration. Embedded in the persisted stage document
  * (`stage.generatedAgentConfigs`) so clients can hydrate the agent registry
- * without relying on IndexedDB pre-population. Present for generated-roster
- * classrooms; preset classrooms carry `agentIds` instead.
+ * without relying on IndexedDB pre-population. Present for every classroom
+ * whose roster is recorded on the document: LLM-generated rosters (auto mode)
+ * and preset lineups frozen at generation time. Legacy preset classrooms
+ * carry only `agentIds` and resolve their cast from global defaults at open
+ * time.
  *
  * The voice fields are optional and additive: documents written before they
  * existed simply lack them, and readers treat an absent voice as "no bound
@@ -155,7 +158,9 @@ export interface Stage {
   // Agent IDs selected when this classroom was created
   agentIds?: string[];
   /**
-   * Server-generated agent configurations. See {@link GeneratedAgentConfig}.
+   * The roster this classroom plays, embedded on the document: portraits and
+   * voice bindings are recorded at generation time so the course keeps the
+   * cast it was made with. See {@link GeneratedAgentConfig}.
    */
   generatedAgentConfigs?: GeneratedAgentConfig[];
   /**

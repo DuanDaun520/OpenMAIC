@@ -71,6 +71,12 @@ export interface GenerationToolbarProps {
    * are inert under the same flag; this only mirrors it in the UI.
    */
   materialsLocked?: boolean;
+  /**
+   * Light-amber notice rendered right of the web-search pill when the account
+   * cannot create courses (admin switch off, or quota full) — the send button
+   * is pre-grayed by the parent, this says why. Undefined = no block.
+   */
+  creationBlockHint?: string;
 }
 
 // ─── Component ───────────────────────────────────────────────
@@ -82,6 +88,7 @@ export function GenerationToolbar({
   onCourseMaterialRemove,
   onPdfError,
   materialsLocked = false,
+  creationBlockHint,
 }: GenerationToolbarProps) {
   const { t } = useI18n();
   const pdfProviderId = useSettingsStore((s) => s.pdfProviderId);
@@ -385,6 +392,13 @@ export function GenerationToolbar({
             <TooltipContent>{t('toolbar.webSearchNoProvider')}</TooltipContent>
           </Tooltip>
         )}
+
+        {/* Creation-permission notice — light amber, right of the Globe pill. */}
+        {creationBlockHint ? (
+          <span className="ml-1 truncate text-xs text-amber-500 dark:text-amber-400">
+            {creationBlockHint}
+          </span>
+        ) : null}
       </div>
     </div>
   );

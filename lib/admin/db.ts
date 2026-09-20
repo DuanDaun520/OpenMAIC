@@ -129,6 +129,31 @@ CREATE TABLE IF NOT EXISTS usage_daily_agg (
   PRIMARY KEY (day, capability, provider_id)
 );
 
+-- One row per generation-route HTTP call, unlike usage_ledger including the
+-- FAILED calls (which carry no billable usage) and the wall-clock duration,
+-- so the admin console can see where generation time goes per course. Written
+-- fire-and-forget by lib/server/generation-trace.ts via
+-- lib/admin/generation-trace-db.ts; never read on the generation path.
+-- stage_id is the course (document stage) id; NULL for calls from clients
+-- that predate stage correlation. Retention ~30 days (opportunistic prune).
+CREATE TABLE IF NOT EXISTS generation_trace (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  stage_id TEXT,
+  owner_id TEXT,
+  step TEXT NOT NULL,
+  page INTEGER,
+  provider_id TEXT,
+  model_id TEXT,
+  duration_ms INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ok',
+  http_status INTEGER,
+  error_code TEXT,
+  error_snippet TEXT
+);
+CREATE INDEX IF NOT EXISTS generation_trace_stage_created_idx ON generation_trace (stage_id, created_at);
+CREATE INDEX IF NOT EXISTS generation_trace_created_idx ON generation_trace (created_at);
+
 -- Quotas bind to the product identity string (owner_id), not to
 -- user_accounts: enforcement works for today's anonymous owners and keeps
 -- working unchanged once real logins replace the anonymous cookie.
@@ -261,6 +286,17 @@ ALTER TABLE user_accounts ADD COLUMN IF NOT EXISTS bio TEXT;
 -- course on the 学习天地 shelf; 'featured' additionally picks it for the
 -- homepage's recommended grid. Same idempotent-ALTER convergence as above.
 ALTER TABLE course_publications ADD COLUMN IF NOT EXISTS featured BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- 制作课程权限与配额：默认禁止、默认上限 3，管理员在用户管理里逐账号开通。
+-- 配额按用户名下未删除（stage_meta.deleted_at IS NULL）的课程数计——软删除即释放。
+ALTER TABLE user_accounts ADD COLUMN IF NOT EXISTS can_create_courses BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_accounts ADD COLUMN IF NOT EXISTS course_creation_quota INTEGER NOT NULL DEFAULT 3;
+
+-- Per-provider extra credentials that don't fit the single api_key column —
+-- today only AliDocMind's AccessKey pair. Map of field name → encrypted
+-- value, encrypted with OPENMAIC_ADMIN_SECRET exactly like api_key_cipher,
+-- so a leaked dump leaks neither. Decrypted only when the overlay applies.
+ALTER TABLE provider_configs ADD COLUMN IF NOT EXISTS extra_secrets JSONB;
 `;
 
 let schemaPromise: Promise<Pool> | undefined;

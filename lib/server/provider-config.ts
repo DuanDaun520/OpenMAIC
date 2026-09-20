@@ -13,6 +13,7 @@ import {
   ensureAdminProviderOverlayFresh,
   getAdminProviderOverlaySync,
   getAdminProviderOverlayVersion,
+  type AdminCapability,
 } from '@/lib/admin/provider-overrides';
 import { decryptSecret } from '@/lib/admin/crypto';
 import { ensureVoiceOverridesFresh } from '@/lib/admin/voice-overrides';
@@ -29,7 +30,7 @@ const log = createLogger('ServerProviderConfig');
 // Types
 // ---------------------------------------------------------------------------
 
-interface ServerProviderEntry {
+export interface ServerProviderEntry {
   apiKey: string;
   baseUrl?: string;
   models?: string[];
@@ -46,7 +47,7 @@ interface ServerProviderEntry {
   enabled?: boolean;
 }
 
-interface ServerConfig {
+export interface ServerConfig {
   providers: Record<string, ServerProviderEntry>;
   tts: Record<string, ServerProviderEntry>;
   asr: Record<string, ServerProviderEntry>;
@@ -583,6 +584,22 @@ const CAPABILITY_SECTION_MAP = {
   websearch: 'webSearch',
 } as const;
 
+/**
+ * Inverse of {@link CAPABILITY_SECTION_MAP}: `ServerConfig` section → admin
+ * capability. Exported for the env/YAML → `provider_configs` import path
+ * (POST /api/admin/providers/import), which walks sections and must land on
+ * the same capability strings the admin console writes.
+ */
+export const SECTION_TO_ADMIN_CAPABILITY: Record<ProviderSection, AdminCapability> = {
+  providers: 'llm',
+  tts: 'tts',
+  asr: 'asr',
+  pdf: 'pdf',
+  image: 'image',
+  video: 'video',
+  webSearch: 'websearch',
+};
+
 function applyAdminProviderOverlay(config: ServerConfig): void {
   const overlay = getAdminProviderOverlaySync();
   if (!overlay) return;
@@ -596,6 +613,13 @@ function applyAdminProviderOverlay(config: ServerConfig): void {
       models: normalizeModelList(row.models),
       proxy: row.proxy || undefined,
     };
+    // Extra credentials (AliDocMind's AccessKey pair) ride the row's
+    // extra_secrets map, encrypted exactly like the API key.
+    if (row.extraSecrets?.accessKeyId)
+      entry.accessKeyId = decryptSecret(row.extraSecrets.accessKeyId);
+    if (row.extraSecrets?.accessKeySecret) {
+      entry.accessKeySecret = decryptSecret(row.extraSecrets.accessKeySecret);
+    }
 
     if (sectionKey === 'providers' || sectionKey === 'pdf') {
       // LLM and PDF have no force-disable concept: `enabled: false` removes
@@ -637,6 +661,16 @@ function getConfig(): ServerConfig {
   return config;
 }
 
+/**
+ * The env/YAML-only view of the server config — no DB overlay applied. This is
+ * the import route's source when seeding `provider_configs` from the config
+ * files (POST /api/admin/providers/import): applying the overlay here would
+ * round-trip DB rows back into the rows the import is about to write.
+ */
+export function loadEnvYamlServerConfig(filename: string = DEFAULT_FILENAME): ServerConfig {
+  return buildConfig(loadYamlFile(filename));
+}
+
 // ---------------------------------------------------------------------------
 // Managed-provider resolution
 //
@@ -649,7 +683,7 @@ function getConfig(): ServerConfig {
 // server config (the bug class #533 patched route-by-route).
 // ---------------------------------------------------------------------------
 
-type ProviderSection = 'providers' | 'tts' | 'asr' | 'pdf' | 'image' | 'video' | 'webSearch';
+export type ProviderSection = 'providers' | 'tts' | 'asr' | 'pdf' | 'image' | 'video' | 'webSearch';
 
 /** Whether the operator configured this provider in the given section. */
 export function isServerConfiguredProvider(section: ProviderSection, providerId: string): boolean {
@@ -1097,16 +1131,27 @@ export function resolveServerWebSearchProviderId(preferredProviderId?: string): 
 }
 
 /**
- * Opt-in concurrency for parallel scene-content generation (#572).
+ * Default parallel scene-content generation (#572) when the env var is unset.
  *
- * Returns the server-configured `PARALLEL_SCENE_CONCURRENCY`, clamped to
- * [0, 10]. `0` (the default) means the client keeps the original serial
- * generation loop; a value `> 1` enables the hybrid two-phase path. Kept
- * server-side because many deployments use API keys with low per-key
- * concurrency quotas, where a bursty default would surface as 429s.
+ * 3 pipelined content fetches + up to 3 concurrent TTS calls per scene is
+ * enough to hide per-page latency without tripping typical per-key quotas,
+ * and transient 429s are absorbed by the generation retry backoff.
+ */
+export const DEFAULT_PARALLEL_SCENE_CONCURRENCY = 3;
+
+/**
+ * Server-configured `PARALLEL_SCENE_CONCURRENCY`, clamped to [0, 10].
+ *
+ * Unset/empty → the default above. An EXPLICIT `0` (or negative/garbage value)
+ * → 0, serial: an operator who pinned serial to protect a low per-key
+ * concurrency quota must stay serial. A value > 1 enables the hybrid
+ * two-phase path (pipelined content fetches, parallel TTS within a scene;
+ * actions stay serial).
  */
 export function getParallelSceneConcurrency(): number {
-  const raw = Number.parseInt(process.env.PARALLEL_SCENE_CONCURRENCY ?? '', 10);
-  if (!Number.isFinite(raw) || raw <= 0) return 0;
-  return Math.min(raw, 10);
+  const raw = process.env.PARALLEL_SCENE_CONCURRENCY?.trim();
+  if (!raw) return DEFAULT_PARALLEL_SCENE_CONCURRENCY;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.min(parsed, 10);
 }

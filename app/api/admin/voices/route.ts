@@ -1,10 +1,13 @@
 /**
  * /api/admin/voices — TTS voice catalog management (音色管理).
  *
- * - GET     lists every built-in TTS provider's full voice table with any
- *           override applied (renamed / re-gendered / hidden / appended
- *           custom voice), plus the raw override rows, so the console edits
- *           the effective catalog rather than a diff view.
+ * The console only manages Doubao TTS 2.0 (Volcengine) voices; other
+ * built-in providers are out of scope and not listed or writable here.
+ *
+ * - GET     lists the managed provider's full voice table with any override
+ *           applied (renamed / re-gendered / hidden / appended custom voice),
+ *           plus the raw override rows, so the console edits the effective
+ *           catalog rather than a diff view.
  * - PUT     upserts one (providerId, voiceId) override row. A row whose
  *           voiceId is not a preset ADDS that voice to the provider's picker
  *           list; `hidden: true` removes a voice from every picker.
@@ -30,6 +33,9 @@ import { apiError } from '@/lib/server/api-response';
 export const runtime = 'nodejs';
 
 const GENDERS = new Set(['male', 'female', 'neutral']);
+
+/** The only provider this console manages: Doubao TTS 2.0 (Volcengine). */
+const MANAGED_PROVIDER_ID = 'doubao-tts';
 
 function builtinTTSProviderIds(): string[] {
   return Object.entries(TTS_PROVIDERS)
@@ -63,7 +69,7 @@ export async function GET(request: Request) {
     byProvider.set(row.providerId, list);
   }
 
-  const providers = builtinTTSProviderIds().map((providerId) => {
+  const providers = [MANAGED_PROVIDER_ID].map((providerId) => {
     const config = TTS_PROVIDERS[providerId as keyof typeof TTS_PROVIDERS];
     const overrideRows = byProvider.get(providerId) ?? [];
     const rowByVoiceId = new Map(overrideRows.map((row) => [row.voiceId, row]));
@@ -74,7 +80,11 @@ export async function GET(request: Request) {
     const voices = [
       ...config.voices.map((voice) => {
         const row = rowByVoiceId.get(voice.id);
-        const merged = applyVoiceOverrides([voice], row ? [row] : [])[0];
+        // applyVoiceOverrides drops hidden voices entirely, which would lose
+        // the preset's identity here — the console view wants the preset
+        // itself (id/name intact) flagged as hidden, so only merge non-hidden
+        // rows and fall back to the bare preset otherwise.
+        const merged = row && !row.hidden ? applyVoiceOverrides([voice], [row])[0] : voice;
         return {
           ...merged,
           hidden: row?.hidden === true,
@@ -105,7 +115,9 @@ export async function GET(request: Request) {
   });
 
   // Rows keyed at a provider id outside the built-in registry (e.g. one was
-  // renamed upstream) — surfaced so the console can clean them up.
+  // renamed upstream) — surfaced so the console can clean them up. Checked
+  // against the full built-in registry, not the managed set, so override rows
+  // for other providers are not misreported as orphaned.
   const builtin = new Set(builtinTTSProviderIds());
   const orphaned = rows.filter((row) => !builtin.has(row.providerId)).map(toClientRow);
 
@@ -136,11 +148,11 @@ export async function PUT(request: Request) {
 
   const providerId = typeof body.providerId === 'string' ? body.providerId.trim() : '';
   const voiceId = typeof body.voiceId === 'string' ? body.voiceId.trim() : '';
-  if (!Object.hasOwn(TTS_PROVIDERS, providerId) || providerId === 'browser-native-tts') {
+  if (providerId !== MANAGED_PROVIDER_ID) {
     return apiError(
       'INVALID_REQUEST',
       400,
-      'providerId 必须是内置 TTS Provider（非 browser-native）',
+      '音色管理仅支持豆包 TTS 2.0（火山引擎），providerId 必须是 doubao-tts',
     );
   }
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(voiceId)) {
@@ -229,7 +241,14 @@ export async function DELETE(request: Request) {
   const url = new URL(request.url);
   const providerId = (url.searchParams.get('providerId') ?? '').trim();
   const voiceId = (url.searchParams.get('voiceId') ?? '').trim();
-  if (!providerId || !voiceId) {
+  if (providerId !== MANAGED_PROVIDER_ID) {
+    return apiError(
+      'INVALID_REQUEST',
+      400,
+      '音色管理仅支持豆包 TTS 2.0（火山引擎），providerId 必须是 doubao-tts',
+    );
+  }
+  if (!voiceId) {
     return apiError('INVALID_REQUEST', 400, '需要 providerId 与 voiceId 查询参数');
   }
 

@@ -39,7 +39,8 @@ export async function GET(request: Request) {
     params,
   );
   const rows = await pool.query(
-    `SELECT id, username, display_name, avatar_url, nickname, status, org_id, owner_cookie, created_at, updated_at
+    `SELECT id, username, display_name, avatar_url, nickname, status, org_id, owner_cookie,
+            can_create_courses, course_creation_quota, created_at, updated_at
      FROM user_accounts ${where}
      ORDER BY created_at DESC
      LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
@@ -69,6 +70,12 @@ export async function POST(request: Request) {
   const password = typeof body.password === 'string' ? body.password : '';
   const displayName = typeof body.displayName === 'string' ? body.displayName.trim() : null;
   const status = body.status === 'disabled' ? 'disabled' : 'active';
+  // 制作课程 grant：开关默认关；上限默认 3（非法值 → 400，与列默认一致的范围）。
+  const canCreateCourses = body.canCreateCourses === true;
+  const quotaRaw = body.courseCreationQuota ?? 3;
+  if (typeof quotaRaw !== 'number' || !Number.isInteger(quotaRaw) || quotaRaw < 0 || quotaRaw > 999) {
+    return apiError('INVALID_REQUEST', 400, '制作课程上限需为 0-999 的整数');
+  }
 
   if (!/^[a-zA-Z0-9_.-]{2,64}$/.test(username)) {
     return apiError('INVALID_REQUEST', 400, '用户名需为 2-64 位字母/数字/_.-');
@@ -80,15 +87,24 @@ export async function POST(request: Request) {
   const pool = await getAdminPool();
   try {
     const result = await pool.query(
-      `INSERT INTO user_accounts (username, password_hash, display_name, avatar_url, status)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id, username, display_name, avatar_url, nickname, status, created_at, updated_at`,
-      [username, hashAdminPassword(password), displayName, DEFAULT_AVATAR_URL, status],
+      `INSERT INTO user_accounts (username, password_hash, display_name, avatar_url, status, can_create_courses, course_creation_quota)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, username, display_name, avatar_url, nickname, status, can_create_courses, course_creation_quota, created_at, updated_at`,
+      [
+        username,
+        hashAdminPassword(password),
+        displayName,
+        DEFAULT_AVATAR_URL,
+        status,
+        canCreateCourses,
+        quotaRaw,
+      ],
     );
     await recordAudit(guard.session, {
       action: 'user.create',
       targetType: 'user_account',
       targetId: result.rows[0].id,
-      detail: { username, status },
+      detail: { username, status, canCreateCourses, courseCreationQuota: quotaRaw },
       ip: requestIp(request),
     });
     return Response.json({ success: true, user: result.rows[0] }, { status: 201 });

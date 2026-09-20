@@ -8,17 +8,43 @@
  *
  * 自制课程 cards show the first page as the cover (explicit AI cover >
  * first-slide thumbnail > gradient fallback), the generation status
- * (已结束/生成中/失败), the generated page count, and the time. The edit
+ * (已生成/生成中/失败), the generated page count, and the time. The edit
  * dialog can revise 标题/封面/介绍 — each field with an AI-generate button
- * (ai-meta for title/intro ≤200字, ai-cover for the cover image).
+ * (ai-meta for title/intro ≤200字, ai-cover for the cover image) — but only
+ * once generation has finished: while the status is 生成中 the pencil stays
+ * off the card (a mid-generation edit would race the generator's own writes).
+ * 收藏 is for other people's courses: 自制课程 cards carry no star — the
+ * favorite tab still shows one on anything listed there so no favorite can
+ * strand without an un-favorite affordance.
+ *
+ * 自制课程 cards also carry a delete affordance (same 生成中 gate as the
+ * pencil): deletion is the server's SOFT delete (a `stage_meta` tombstone —
+ * the rows survive for the admin console; the shelf simply stops listing the
+ * course), and it frees the account's course-creation quota headroom.
+ *
+ * The course-creation grant shapes the page: with the admin switch off the
+ * 自制课程 tab drops to LAST (the landing tab becomes 收藏课程) and its
+ * 去制作课程 affordance grays out; with the switch on a sky banner states the
+ * remaining quota (course making burns a lot of AI resources); a full quota
+ * keeps the tab in place but explains itself via the amber banner.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { BookOpen, Loader2, Pencil, Sparkles, Star, Wand2 } from 'lucide-react';
+import { BookOpen, Loader2, Pencil, Sparkles, Star, Trash2, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { SiteHeader } from '@/components/site-header/site-header';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   Dialog,
   DialogContent,
@@ -32,9 +58,11 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { coverGradient } from '@/lib/utils/cover-gradient';
+import { deleteStageData } from '@/lib/utils/stage-storage';
 import { useAuthModalStore } from '@/lib/store/auth-modal';
 import { isSlideContent } from '@/lib/types/stage';
 import { STAGE_NAME_MAX_LENGTH } from '@/lib/server/agent-runtime/stage-limits';
+import type { CourseCreationGrant } from '@/lib/server/course-creation-gate';
 
 const DESCRIPTION_MAX_LENGTH = 200;
 
@@ -76,7 +104,7 @@ function formatTime(epochOrIso: number | string): string {
 }
 
 const STATUS_LABEL: Record<GenerationStatus, string> = {
-  completed: '已结束',
+  completed: '已生成',
   generating: '生成中',
   failed: '失败',
 };
@@ -93,6 +121,26 @@ export default function MyCoursesPage() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<CourseTab>('owned');
   const [editing, setEditing] = useState<MyCourse | null>(null);
+  const [deleting, setDeleting] = useState<MyCourse | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  // Course-creation grant (admin switch + live quota) — explains in the
+  // 自制课程 tab why making courses may be unavailable.
+  const [creationGrant, setCreationGrant] = useState<CourseCreationGrant | null>(null);
+  /** Guards the one-time landing-tab switch — later grant refreshes (e.g.
+   * after a delete) must never yank the user off a tab they chose. */
+  const landingTabResolved = useRef(false);
+
+  const refreshCreationGrant = useCallback(async () => {
+    try {
+      const response = await fetch('/api/auth/me');
+      const body = (await response.json().catch(() => null)) as {
+        user?: { courseCreation?: CourseCreationGrant };
+      } | null;
+      setCreationGrant(body?.user?.courseCreation ?? null);
+    } catch {
+      // Leave the previous grant in place on a flaky probe.
+    }
+  }, []);
 
   const loadCourses = useCallback(async (): Promise<MyCourse[] | null> => {
     try {
@@ -125,14 +173,14 @@ export default function MyCoursesPage() {
         return;
       }
       setAuthChecked(true);
-      await loadCourses();
+      await Promise.all([loadCourses(), refreshCreationGrant()]);
     })();
     const onAuthChanged = () => {
       void (async () => {
         const auth = await fetch('/api/auth/me');
         if (cancelled || auth.status === 401) return;
         setAuthChecked(true);
-        await loadCourses();
+        await Promise.all([loadCourses(), refreshCreationGrant()]);
       })();
     };
     window.addEventListener('openmaic:auth-changed', onAuthChanged);
@@ -140,7 +188,7 @@ export default function MyCoursesPage() {
       cancelled = true;
       window.removeEventListener('openmaic:auth-changed', onAuthChanged);
     };
-  }, [loadCourses]);
+  }, [loadCourses, refreshCreationGrant]);
 
   const toggleFavorite = async (course: MyCourse) => {
     const next = !course.isFavorite;
@@ -163,6 +211,26 @@ export default function MyCoursesPage() {
     }
   };
 
+  const confirmDelete = async () => {
+    const course = deleting;
+    if (!course || deleteBusy) return;
+    setDeleteBusy(true);
+    // Optimistic removal, use-home-discovery style. Server-side this is the
+    // tombstone soft delete — the rows survive for the admin console.
+    setCourses((prev) => prev?.filter((c) => c.id !== course.id) ?? prev);
+    try {
+      await deleteStageData(course.id);
+    } catch {
+      toast.error('删除失败，请重试');
+    } finally {
+      setDeleteBusy(false);
+      setDeleting(null);
+      await loadCourses();
+      // A deletion frees quota headroom — converge the banner with it.
+      await refreshCreationGrant();
+    }
+  };
+
   // ── Tab splits (owned ∪ favorite ∪ learned arrive in one payload) ──
   const owned = useMemo(() => (courses ?? []).filter((c) => c.isOwned), [courses]);
   const favorite = useMemo(() => (courses ?? []).filter((c) => c.isFavorite), [courses]);
@@ -173,6 +241,38 @@ export default function MyCoursesPage() {
         .sort((a, b) => (a.lastLearnedAt! < b.lastLearnedAt! ? 1 : -1)),
     [courses],
   );
+
+  // The grant's shape: switch off → 自制课程 is demoted to the last tab (the
+  // account isn't a course maker); anything else keeps the default order.
+  const creationForbidden =
+    creationGrant !== null && !creationGrant.allowed && creationGrant.reason === 'forbidden';
+  const creationBlocked = creationGrant !== null && !creationGrant.allowed;
+
+  // One-time landing-tab pick: a demoted 自制课程 must not also be the tab the
+  // page opens on — land on the new first tab (收藏课程) instead.
+  useEffect(() => {
+    if (landingTabResolved.current || creationGrant === null) return;
+    landingTabResolved.current = true;
+    if (creationForbidden && tab === 'owned') setTab('favorite');
+    // `tab` deliberately excluded: this runs once, on the grant's arrival,
+    // before the user has had a chance to pick a tab themselves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creationGrant, creationForbidden]);
+
+  const tabItems: { value: CourseTab; label: string }[] = [
+    { value: 'owned', label: `自制课程（${owned.length}）` },
+    { value: 'favorite', label: `收藏课程（${favorite.length}）` },
+    { value: 'learned', label: `已学习课程（${learned.length}）` },
+  ];
+  const orderedTabs = creationForbidden ? [tabItems[1], tabItems[2], tabItems[0]] : tabItems;
+
+  // Why course making is unavailable, when it is (switch off / quota full).
+  const creationBlockedMessage =
+    creationGrant && !creationGrant.allowed
+      ? creationGrant.reason === 'quota'
+        ? `自制课程已达上限（${creationGrant.limit} 个），删除旧课程后可继续制作。`
+        : '您暂时没有制作课程的权限，如果您认为自己可以制作课程，可以联系管理员。'
+      : null;
 
   const visible = tab === 'owned' ? owned : tab === 'favorite' ? favorite : learned;
 
@@ -217,17 +317,36 @@ export default function MyCoursesPage() {
           </div>
         ) : (
           <>
+            {/* 配额说明 — switch on: state the headroom (course making burns a
+                lot of AI resources); shown page-top, above the tabs. */}
+            {creationGrant?.allowed && (
+              <div className="mb-4 rounded-lg border border-sky-300/60 bg-sky-50 px-4 py-3 text-sm text-sky-700 dark:border-sky-500/30 dark:bg-sky-950/30 dark:text-sky-400">
+                您可以创建 {Math.max(0, creationGrant.limit - creationGrant.used)}{' '}
+                个课程，因为每创建一次课程，会有大量的 AI
+                资源消耗，所以需要谨慎使用，不随意生成。
+              </div>
+            )}
+
             <Tabs value={tab} onValueChange={(v) => setTab(v as CourseTab)}>
               <TabsList>
-                <TabsTrigger value="owned">自制课程（{owned.length}）</TabsTrigger>
-                <TabsTrigger value="favorite">收藏课程（{favorite.length}）</TabsTrigger>
-                <TabsTrigger value="learned">已学习课程（{learned.length}）</TabsTrigger>
+                {orderedTabs.map((item) => (
+                  <TabsTrigger key={item.value} value={item.value}>
+                    {item.label}
+                  </TabsTrigger>
+                ))}
               </TabsList>
             </Tabs>
 
+            {/* 制作权限说明 — admin switch off, or the live quota is full. */}
+            {tab === 'owned' && creationBlockedMessage && (
+              <div className="mt-4 rounded-lg border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-400">
+                {creationBlockedMessage}
+              </div>
+            )}
+
             <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {visible.length === 0 ? (
-                <TabEmptyState tab={tab} />
+                <TabEmptyState tab={tab} createBlocked={creationBlocked} />
               ) : (
                 visible.map((course) => (
                   <CourseCard
@@ -236,6 +355,7 @@ export default function MyCoursesPage() {
                     tab={tab}
                     onToggleFavorite={() => void toggleFavorite(course)}
                     onEdit={() => setEditing(course)}
+                    onDelete={() => setDeleting(course)}
                   />
                 ))
               )}
@@ -243,6 +363,33 @@ export default function MyCoursesPage() {
           </>
         )}
       </main>
+
+      <AlertDialog open={!!deleting} onOpenChange={(open) => !open && setDeleting(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除课程「{deleting?.name}」？</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除后课程将从列表中移除（管理员仍可查看），不可恢复。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteBusy}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              disabled={deleteBusy}
+              onClick={(event) => {
+                // Keep the dialog open while the deletion runs; confirmDelete
+                // closes it from its finally block.
+                event.preventDefault();
+                void confirmDelete();
+              }}
+            >
+              {deleteBusy ? <Loader2 className="size-4 animate-spin" /> : null}
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <EditCourseDialog
         course={editing}
@@ -256,16 +403,24 @@ export default function MyCoursesPage() {
 }
 
 // ─── Tab empty states ────────────────────────────────────────
-function TabEmptyState({ tab }: { tab: CourseTab }) {
+function TabEmptyState({ tab, createBlocked }: { tab: CourseTab; createBlocked?: boolean }) {
   if (tab === 'owned') {
     return (
       <div className="text-muted-foreground col-span-full flex flex-col items-center gap-4 py-16 text-sm">
         <p>还没有自制课程，去生成第一门吧</p>
-        <Button asChild>
-          <Link href="/">
+        {/* Blocked (switch off or quota full): gray and inert — the homepage's
+            generate button would be gray anyway. Otherwise link to the maker. */}
+        {createBlocked ? (
+          <Button disabled>
             <Sparkles className="size-4" /> 去制作课程
-          </Link>
-        </Button>
+          </Button>
+        ) : (
+          <Button asChild>
+            <Link href="/">
+              <Sparkles className="size-4" /> 去制作课程
+            </Link>
+          </Button>
+        )}
       </div>
     );
   }
@@ -284,11 +439,13 @@ function CourseCard({
   tab,
   onToggleFavorite,
   onEdit,
+  onDelete,
 }: {
   course: MyCourse;
   tab: CourseTab;
   onToggleFavorite: () => void;
   onEdit: () => void;
+  onDelete: () => void;
 }) {
   const canvas = firstSlideCanvas(course);
   const time = tab === 'learned' && course.lastLearnedAt ? course.lastLearnedAt : course.updatedAt;
@@ -333,20 +490,24 @@ function CourseCard({
         )}
       </Link>
 
-      {/* Favorite star */}
-      <button
-        type="button"
-        onClick={onToggleFavorite}
-        aria-label={course.isFavorite ? '取消收藏' : '收藏课程'}
-        className="absolute right-2 top-2 z-10 inline-flex size-7 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-sm transition-colors hover:bg-black/50"
-      >
-        <Star
-          className={cn(
-            'size-4 transition-colors',
-            course.isFavorite && 'fill-amber-400 text-amber-400',
-          )}
-        />
-      </button>
+      {/* Favorite star — other people's courses only (自制课程 carry no star);
+          the favorite tab always shows one so nothing strands favorited with
+          no way back out. */}
+      {(!course.isOwned || tab === 'favorite') && (
+        <button
+          type="button"
+          onClick={onToggleFavorite}
+          aria-label={course.isFavorite ? '取消收藏' : '收藏课程'}
+          className="absolute right-2 top-2 z-10 inline-flex size-7 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-sm transition-colors hover:bg-black/50"
+        >
+          <Star
+            className={cn(
+              'size-4 transition-colors',
+              course.isFavorite && 'fill-amber-400 text-amber-400',
+            )}
+          />
+        </button>
+      )}
 
       {/* Body */}
       <Link href={`/classroom/${course.id}`} className="flex flex-1 flex-col p-4">
@@ -366,17 +527,31 @@ function CourseCard({
         </p>
       </Link>
 
-      {/* Edit (owners only) */}
-      {course.isOwned && (
-        <button
-          type="button"
-          onClick={onEdit}
-          className="absolute bottom-3 right-3 inline-flex size-7 items-center justify-center rounded-full border border-border/60 bg-background/80 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-          aria-label="修改课程信息"
-          title="修改标题 / 封面 / 介绍"
-        >
-          <Pencil className="size-3.5" />
-        </button>
+      {/* Owner actions (owners only, and only once generation has finished —
+          an edit or delete mid-generation would race the generator's own
+          stage writes). Delete is the server's tombstone soft delete: rows
+          survive for the admin console and the quota slot frees up. */}
+      {course.isOwned && course.status !== 'generating' && (
+        <>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="absolute bottom-3 right-12 inline-flex size-7 items-center justify-center rounded-full border border-border/60 bg-background/80 text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+            aria-label="删除课程"
+            title="删除课程（管理员仍可查看）"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="absolute bottom-3 right-3 inline-flex size-7 items-center justify-center rounded-full border border-border/60 bg-background/80 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+            aria-label="修改课程信息"
+            title="修改标题 / 封面 / 介绍"
+          >
+            <Pencil className="size-3.5" />
+          </button>
+        </>
       )}
     </div>
   );

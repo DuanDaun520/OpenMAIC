@@ -6,7 +6,7 @@
  * Does NOT generate actions — use /api/generate/scene-actions for that.
  */
 
-import { NextRequest } from 'next/server';
+import { NextRequest, type NextResponse } from 'next/server';
 import { callLLM } from '@/lib/ai/llm';
 import {
   applyOutlineFallbacks,
@@ -23,6 +23,7 @@ import type {
 } from '@/lib/types/generation';
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { withGenerationTrace, type GenerationTraceContext } from '@/lib/server/generation-trace';
 import { llmApiError } from '@/lib/server/llm-error-response';
 import { resolveModelFromRequest } from '@/lib/server/resolve-model';
 import { resolveVocationalActive } from '@/lib/config/feature-flags';
@@ -56,7 +57,16 @@ const VISION_RESOLUTION_BUDGET_MS = 15_000;
  */
 const MAX_CONSECUTIVE_UNRESOLVABLE_VISION_IMAGES = 3;
 
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  return withGenerationTrace(req, 'scene-content', (trace) =>
+    handleSceneContentRequest(req, trace),
+  );
+}
+
+async function handleSceneContentRequest(
+  req: NextRequest,
+  trace: GenerationTraceContext,
+): Promise<NextResponse> {
   let outlineTitle: string | undefined;
   let resolvedModelString: string | undefined;
   let requestStageId: string | undefined;
@@ -89,6 +99,7 @@ export async function POST(req: NextRequest) {
       requirements?: UserRequirements;
     };
     requestStageId = stageId;
+    trace.stageId = stageId;
     startedAt = Date.now();
 
     // Validate required fields
@@ -116,10 +127,14 @@ export async function POST(req: NextRequest) {
       model: languageModel,
       modelInfo,
       modelString,
+      providerId,
+      modelId,
       thinkingConfig,
     } = await resolveModelFromRequest(req, body, stage);
     outlineTitle = rawOutline?.title;
     resolvedModelString = modelString;
+    trace.providerId = providerId;
+    trace.modelId = modelId;
 
     // Detect vision capability
     const hasVision = !!modelInfo?.capabilities?.vision;
@@ -183,6 +198,7 @@ export async function POST(req: NextRequest) {
     const effectiveOutline = applyOutlineFallbacks(outline, !!languageModel, {
       allowProceduralSkill: vocationalActive,
     });
+    trace.page = effectiveOutline.order;
 
     // ── Filter images assigned to this outline ──
     let assignedImages: PdfImage[] | undefined;

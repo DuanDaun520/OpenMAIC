@@ -30,6 +30,9 @@ export interface UserSession {
   avatarUrl: string | null;
   nickname: string | null;
   bio: string | null;
+  /** Course-creation grant columns (admin-managed); see course-creation-gate.ts. */
+  canCreateCourses: boolean;
+  courseCreationQuota: number;
 }
 
 function hashSessionToken(token: string): string {
@@ -133,8 +136,11 @@ export async function validateUserSession(
     nickname: string | null;
     bio: string | null;
     status: string;
+    can_create_courses: boolean;
+    course_creation_quota: number;
   }>(
-    `SELECT u.id, u.username, u.display_name, u.avatar_url, u.nickname, u.bio, u.status
+    `SELECT u.id, u.username, u.display_name, u.avatar_url, u.nickname, u.bio, u.status,
+            u.can_create_courses, u.course_creation_quota
      FROM user_sessions s
      JOIN user_accounts u ON u.id = s.user_id
      WHERE s.token_hash = $1 AND s.expires_at > now()`,
@@ -149,6 +155,8 @@ export async function validateUserSession(
     avatarUrl: row.avatar_url ?? DEFAULT_AVATAR_URL,
     nickname: row.nickname,
     bio: row.bio,
+    canCreateCourses: row.can_create_courses,
+    courseCreationQuota: row.course_creation_quota,
   };
 }
 

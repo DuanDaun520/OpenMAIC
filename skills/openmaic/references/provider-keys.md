@@ -13,10 +13,10 @@ If the user wants to change any of those, they must edit OpenMAIC server-side co
 ## Interaction Flow
 
 1. Recommend one provider path first (see "Recommendation Paths" below). Do not start by asking for an API key.
-2. Ask whether the user wants to configure it in `.env.local` (recommended for most users) or `server-providers.yml`.
+2. When a database is configured (`DATABASE_URL` + `OPENMAIC_ADMIN_SECRET`), the recommended surface is the admin console (Admin → 模型配置) — provider config is stored in the DB, encrypted, and applies without a restart; the user pastes keys there themselves. Otherwise ask whether they want to configure via `.env.local` (recommended for most users) or `server-providers.yml` (a one-time seed source: on first start an empty provider table is auto-imported from these files).
 3. Tell the user exactly which variables or YAML fields to edit — they edit the file themselves. Do not offer to write the key for them, do not ask for the literal key in chat, and do not suggest temporary request-time overrides.
 4. Wait for the user to confirm they finished editing before continuing.
-5. If generation later fails because of auth, provider, or model selection, direct the user back to the same server-side config files and wait for confirmation before retrying.
+5. If generation later fails because of auth, provider, or model selection, direct the user back to the admin console (DB config wins) or the same server-side config files and wait for confirmation before retrying.
 
 ## Recommendation Paths
 

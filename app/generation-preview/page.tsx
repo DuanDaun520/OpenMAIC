@@ -11,7 +11,11 @@ import { OutlinesEditor } from '@/components/generation/outlines-editor';
 import { cn } from '@/lib/utils';
 import { useStageStore } from '@/lib/store/stage';
 import { useSettingsStore } from '@/lib/store/settings';
-import { useAgentRegistry } from '@/lib/orchestration/registry/store';
+import {
+  useAgentRegistry,
+  applyGeneratedAgentsToRegistry,
+} from '@/lib/orchestration/registry/store';
+import { snapshotPresetRoster } from '@/lib/orchestration/registry/preset-roster-snapshot';
 import {
   getEnabledProvidersWithVoices,
   resolveNarratorVoiceForGeneration,
@@ -741,6 +745,28 @@ function GenerationPreviewContent() {
         persona?: string;
       }> = [];
 
+      // Freeze a preset lineup into the stage's OWN roster: portraits and the
+      // effective voice bindings are properties of the course being made, so
+      // later homepage preset changes (a different teacher voice/portrait)
+      // must not retroactively restyle it. Mirrors what the auto branch does
+      // for its LLM roster: document + registry, stage-scoped agent ids.
+      const freezePresetRoster = (presetIds: string[]) => {
+        const presetConfigs = snapshotPresetRoster({
+          stageId: stage.id,
+          selectedAgentIds: presetIds,
+          voiceProfiles,
+        });
+        stage.generatedAgentConfigs = presetConfigs;
+        const savedIds = applyGeneratedAgentsToRegistry(stage.id, presetConfigs);
+        stage.agentIds = savedIds;
+        return presetConfigs.map((a) => ({
+          id: a.id,
+          name: a.name,
+          role: a.role,
+          persona: a.persona,
+        }));
+      };
+
       if (settings.agentMode === 'auto') {
         const agentStepIdx = activeSteps.findIndex((s) => s.id === 'agent-generation');
         if (agentStepIdx >= 0) setCurrentStepIndex(agentStepIdx);
@@ -945,16 +971,7 @@ function GenerationPreviewContent() {
             const a = registry.getAgent(id);
             return a && !a.isGenerated;
           });
-          agents = fallbackIds
-            .map((id) => registry.getAgent(id))
-            .filter(Boolean)
-            .map((a) => ({
-              id: a!.id,
-              name: a!.name,
-              role: a!.role,
-              persona: a!.persona,
-            }));
-          stage.agentIds = fallbackIds;
+          agents = freezePresetRoster(fallbackIds);
         }
       } else {
         // Preset mode — use selected agents (include persona)
@@ -964,16 +981,7 @@ function GenerationPreviewContent() {
           const a = registry.getAgent(id);
           return a && !a.isGenerated;
         });
-        agents = presetAgentIds
-          .map((id) => registry.getAgent(id))
-          .filter(Boolean)
-          .map((a) => ({
-            id: a!.id,
-            name: a!.name,
-            role: a!.role,
-            persona: a!.persona,
-          }));
-        stage.agentIds = presetAgentIds;
+        agents = freezePresetRoster(presetAgentIds);
       }
 
       // Move to scene generation step

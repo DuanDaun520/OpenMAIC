@@ -43,10 +43,20 @@ export interface UserProfileState {
    * `components/account-profile-sync.tsx`.
    */
   accountBound: boolean;
+  /**
+   * The logged-in account's header-style name (真实姓名 > 工号) — the fallback
+   * profile surfaces show while no AI 昵称 is set, so they read as "the
+   * logged-in user" instead of the generic 同学. Session state exactly like
+   * `accountBound`: filled by `hydrateFromServer`, never persisted, null
+   * while anonymous.
+   */
+  accountName: string | null;
   setAvatar: (avatar: string) => void;
   setNickname: (nickname: string) => void;
   setBio: (bio: string) => void;
-  bindToAccount: () => void;
+  /** Bind to a live session, keeping this browser's local values but adopting
+   * the account's 真实姓名/工号 as the display fallback. */
+  bindToAccount: (accountName: string | null) => void;
   markAnonymous: () => void;
   /** Adopt the server's values wholesale (server-wins hydration). */
   hydrateFromServer: (profile: ServerProfile) => void;
@@ -54,6 +64,8 @@ export interface UserProfileState {
 
 /** The account-side shape returned by /api/auth/me and PATCH /api/auth/profile. */
 export interface ServerProfile {
+  username: string;
+  displayName: string | null;
   avatarUrl: string | null;
   nickname: string | null;
   bio: string | null;
@@ -79,6 +91,7 @@ export const useUserProfileStore = create<UserProfileState>()(
       nickname: '',
       bio: '',
       accountBound: false,
+      accountName: null,
       setAvatar: (avatar) => {
         set({ avatar });
         if (get().accountBound) pushServerProfilePatch({ avatarUrl: avatar });
@@ -91,14 +104,15 @@ export const useUserProfileStore = create<UserProfileState>()(
         set({ bio });
         if (get().accountBound) pushServerProfilePatch({ bio });
       },
-      bindToAccount: () => set({ accountBound: true }),
-      markAnonymous: () => set({ accountBound: false }),
+      bindToAccount: (accountName) => set({ accountBound: true, accountName }),
+      markAnonymous: () => set({ accountBound: false, accountName: null }),
       hydrateFromServer: (profile) =>
         set({
           avatar: profile.avatarUrl || AVATAR_OPTIONS[0],
           nickname: profile.nickname ?? '',
           bio: profile.bio ?? '',
           accountBound: true,
+          accountName: profile.displayName?.trim() || profile.username || null,
         }),
     }),
     {

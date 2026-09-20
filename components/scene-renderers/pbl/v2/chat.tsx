@@ -25,7 +25,6 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { AvatarDisplay } from '@/components/ui/avatar-display';
-import { SpeechButton } from '@/components/audio/speech-button';
 
 import type {
   PBLChatMessage,
@@ -710,14 +709,6 @@ export function PBLV2Chat({
               handoverPending && 'pointer-events-none',
             )}
             style={{ fontFamily: 'inherit' }}
-          />
-          <SpeechButton
-            onTranscription={(text) => {
-              if (!text.trim()) return;
-              setInput((prev) => (prev ? `${prev} ${text}` : text));
-            }}
-            disabled={chatBusy || projectCompleted || handoverPending}
-            continuous
           />
           <button
             onClick={handleSend}

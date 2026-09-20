@@ -158,9 +158,11 @@ describe('provider-config', () => {
       delete process.env.PARALLEL_SCENE_CONCURRENCY;
     });
 
-    it('defaults to 0 (serial) when unset', async () => {
+    it('defaults to 3 (parallel) when unset or empty', async () => {
       const { getParallelSceneConcurrency } = await import('@/lib/server/provider-config');
-      expect(getParallelSceneConcurrency()).toBe(0);
+      expect(getParallelSceneConcurrency()).toBe(3);
+      vi.stubEnv('PARALLEL_SCENE_CONCURRENCY', '');
+      expect(getParallelSceneConcurrency()).toBe(3);
     });
 
     it('reads a positive integer from the env var', async () => {

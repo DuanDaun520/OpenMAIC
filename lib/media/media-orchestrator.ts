@@ -951,7 +951,7 @@ async function generateSingleMedia(
       const objectUrl = URL.createObjectURL(blob);
       useMediaGenerationStore.getState().markDone(req.elementId, objectUrl);
     } else {
-      const result = await callVideoApi(req, abortSignal);
+      const result = await callVideoApi(req, stageId, abortSignal);
 
       if (serverBacked) {
         throwIfAborted(abortSignal);
@@ -1120,6 +1120,7 @@ async function callImageApi(
 
 async function callVideoApi(
   req: MediaGenerationRequest,
+  stageId: string,
   abortSignal?: AbortSignal,
 ): Promise<{
   url: string;
@@ -1145,6 +1146,7 @@ async function callVideoApi(
     body: JSON.stringify({
       prompt: req.prompt,
       aspectRatio: req.aspectRatio,
+      stageId,
     }),
     signal: abortSignal,
   });

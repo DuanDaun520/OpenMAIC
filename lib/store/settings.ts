@@ -1005,8 +1005,9 @@ export const useSettingsStore = create<SettingsState>()(
         ttsEnabled: false,
         asrEnabled: true,
 
-        // Off until the server reports a concurrency via fetchServerProviders.
-        parallelSceneConcurrency: 0,
+        // Matches the server's default until fetchServerProviders reports the
+        // operator's actual value (it always overwrites this on mount).
+        parallelSceneConcurrency: 3,
 
         autoConfigApplied: false,
 

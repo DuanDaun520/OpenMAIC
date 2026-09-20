@@ -6,7 +6,7 @@
  * This is the second half of the two-step scene generation pipeline.
  */
 
-import { NextRequest } from 'next/server';
+import { NextRequest, type NextResponse } from 'next/server';
 import { callLLM } from '@/lib/ai/llm';
 import {
   generateSceneActions,
@@ -27,6 +27,7 @@ import type { PBLContent } from '@/lib/types/stage';
 import { createLogger } from '@/lib/logger';
 import { normalizeLegacyPBLContent } from '@/lib/pbl/legacy/read';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { withGenerationTrace, type GenerationTraceContext } from '@/lib/server/generation-trace';
 import { llmApiError } from '@/lib/server/llm-error-response';
 import { resolveModelFromRequest } from '@/lib/server/resolve-model';
 
@@ -34,7 +35,16 @@ const log = createLogger('Scene Actions API');
 
 export const maxDuration = 60;
 
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  return withGenerationTrace(req, 'scene-actions', (trace) =>
+    handleSceneActionsRequest(req, trace),
+  );
+}
+
+async function handleSceneActionsRequest(
+  req: NextRequest,
+  trace: GenerationTraceContext,
+): Promise<NextResponse> {
   let outlineTitle: string | undefined;
   let resolvedModelString: string | undefined;
   let requestStageId: string | undefined;
@@ -89,6 +99,8 @@ export async function POST(req: NextRequest) {
       model: languageModel,
       modelInfo,
       modelString,
+      providerId,
+      modelId,
       thinkingConfig,
     } = await resolveModelFromRequest(req, body, 'scene-actions');
     outlineTitle = outline?.title;
@@ -139,11 +151,15 @@ export async function POST(req: NextRequest) {
     };
 
     requestStageId = stageId;
+    trace.stageId = stageId;
+    trace.providerId = providerId;
+    trace.modelId = modelId;
 
     // ── Build cross-scene context ──
     const allTitles = allOutlines.map((o) => o.title);
     const pageIndex = allOutlines.findIndex((o) => o.id === outline.id);
     const page = (pageIndex >= 0 ? pageIndex : 0) + 1;
+    trace.page = page;
     const ctx: SceneGenerationContext = {
       pageIndex: page,
       totalPages: allOutlines.length,

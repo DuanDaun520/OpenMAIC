@@ -14,7 +14,14 @@ export interface AuditEntry {
   ip?: string;
 }
 
-export async function recordAudit(session: AdminSession, entry: AuditEntry): Promise<void> {
+/**
+ * `session` is the acting admin's session, or `{ userId: null, username }`
+ * for system actions (e.g. the provider-config bootstrap seed).
+ */
+export async function recordAudit(
+  session: AdminSession | { userId: null; username: string },
+  entry: AuditEntry,
+): Promise<void> {
   try {
     const pool = await getAdminPool();
     await pool.query(

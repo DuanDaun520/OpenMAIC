@@ -2,8 +2,8 @@
 
 /**
  * /admin/users — platform end-user account management (P0): search, create,
- * edit (真实姓名/status/password), delete. No role concept; 工号 (username) is
- * the immutable account key. Avatars and AI 昵称 are user-managed in the
+ * edit (真实姓名/AI 昵称/status/password), delete. No role concept; 工号
+ * (username) is the immutable account key. Avatars stay user-managed in the
  * product (/profile, 首页 GreetingBar) — shown read-only here.
  */
 import { useCallback, useEffect, useState } from 'react';
@@ -41,6 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import {
   Table,
   TableBody,
@@ -57,6 +58,8 @@ interface UserRow {
   avatar_url: string | null;
   nickname: string | null;
   status: 'active' | 'disabled';
+  can_create_courses: boolean;
+  course_creation_quota: number;
   created_at: string;
   updated_at: string;
 }
@@ -74,11 +77,17 @@ interface EditorState {
   username: string;
   password: string;
   displayName: string;
+  nickname: string;
   status: 'active' | 'disabled';
+  canCreateCourses: boolean;
+  /** Text-typed for the number input; parsed + range-checked on save. */
+  courseCreationQuota: string;
 }
 
 // 新建用户：默认密码 abc123 预填（唯一预填项），工号/真实姓名留空。
+// 制作权限默认关、上限默认 3 — 与 user_accounts 的列默认一致。
 const DEFAULT_NEW_USER_PASSWORD = 'abc123';
+const DEFAULT_COURSE_CREATION_QUOTA = 3;
 
 const EMPTY_EDITOR: EditorState = {
   open: false,
@@ -86,7 +95,10 @@ const EMPTY_EDITOR: EditorState = {
   username: '',
   password: DEFAULT_NEW_USER_PASSWORD,
   displayName: '',
+  nickname: '',
   status: 'active',
+  canCreateCourses: false,
+  courseCreationQuota: String(DEFAULT_COURSE_CREATION_QUOTA),
 };
 
 const PAGE_SIZE = 20;
@@ -127,6 +139,11 @@ export default function AdminUsersPage() {
   }, [load, page]);
 
   async function handleSave() {
+    const quota = Number.parseInt(editor.courseCreationQuota, 10);
+    if (!Number.isInteger(quota) || quota < 0 || quota > 999) {
+      toast.error('制作课程上限需为 0-999 的整数');
+      return;
+    }
     setSaving(true);
     try {
       const isEdit = !!editor.original;
@@ -139,7 +156,10 @@ export default function AdminUsersPage() {
             isEdit
               ? {
                   displayName: editor.displayName,
+                  nickname: editor.nickname,
                   status: editor.status,
+                  canCreateCourses: editor.canCreateCourses,
+                  courseCreationQuota: quota,
                   ...(editor.password === '' ? {} : { password: editor.password }),
                 }
               : {
@@ -147,6 +167,8 @@ export default function AdminUsersPage() {
                   password: editor.password,
                   displayName: editor.displayName,
                   status: editor.status,
+                  canCreateCourses: editor.canCreateCourses,
+                  courseCreationQuota: quota,
                 },
           ),
         },
@@ -228,6 +250,7 @@ export default function AdminUsersPage() {
               <TableHead>真实姓名</TableHead>
               <TableHead>AI 昵称</TableHead>
               <TableHead>状态</TableHead>
+              <TableHead>制作权限</TableHead>
               <TableHead>创建时间</TableHead>
               <TableHead className="text-right">操作</TableHead>
             </TableRow>
@@ -235,13 +258,13 @@ export default function AdminUsersPage() {
           <TableBody>
             {loading && !data ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground py-10 text-center">
+                <TableCell colSpan={8} className="text-muted-foreground py-10 text-center">
                   <Loader2 className="mx-auto size-5 animate-spin" />
                 </TableCell>
               </TableRow>
             ) : data?.users.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground py-10 text-center text-sm">
+                <TableCell colSpan={8} className="text-muted-foreground py-10 text-center text-sm">
                   暂无用户
                 </TableCell>
               </TableRow>
@@ -252,7 +275,10 @@ export default function AdminUsersPage() {
                   <TableCell>
                     <span className="inline-flex size-7 items-center justify-center overflow-hidden rounded-full bg-muted">
                       <AvatarDisplay
-                        src={user.avatar_url ?? (user.display_name || user.username).slice(0, 1).toUpperCase()}
+                        src={
+                          user.avatar_url ??
+                          (user.display_name || user.username).slice(0, 1).toUpperCase()
+                        }
                         alt={user.username}
                       />
                     </span>
@@ -264,6 +290,15 @@ export default function AdminUsersPage() {
                       <Badge variant="secondary">正常</Badge>
                     ) : (
                       <Badge variant="destructive">停用</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {user.can_create_courses ? (
+                      <Badge variant="outline" className="gap-1 text-emerald-600">
+                        可制作 · {user.course_creation_quota}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">禁止</span>
                     )}
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs">
@@ -281,7 +316,10 @@ export default function AdminUsersPage() {
                             username: user.username,
                             password: '',
                             displayName: user.display_name ?? '',
+                            nickname: user.nickname ?? '',
                             status: user.status,
+                            canCreateCourses: user.can_create_courses,
+                            courseCreationQuota: String(user.course_creation_quota),
                           })
                         }
                       >
@@ -360,6 +398,22 @@ export default function AdminUsersPage() {
                 }
               />
             </div>
+            {editor.original ? (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="user-nickname">
+                  AI 昵称
+                  <span className="text-muted-foreground text-xs">（最多 20 字，留空则清除）</span>
+                </Label>
+                <Input
+                  id="user-nickname"
+                  value={editor.nickname}
+                  maxLength={20}
+                  onChange={(event) =>
+                    setEditor((state) => ({ ...state, nickname: event.target.value }))
+                  }
+                />
+              </div>
+            ) : null}
             <div className="flex flex-col gap-2">
               <Label htmlFor="user-password">
                 密码
@@ -392,6 +446,37 @@ export default function AdminUsersPage() {
                   <SelectItem value="disabled">停用</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="user-can-create-courses">允许制作课程</Label>
+              <div className="flex items-center gap-3">
+                <Switch
+                  id="user-can-create-courses"
+                  checked={editor.canCreateCourses}
+                  onCheckedChange={(checked) =>
+                    setEditor((state) => ({ ...state, canCreateCourses: checked }))
+                  }
+                />
+                <span className="text-muted-foreground text-xs">
+                  关闭时，该用户无法在首页新建课程（默认关闭）
+                </span>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="user-course-creation-quota">制作课程上限</Label>
+              <Input
+                id="user-course-creation-quota"
+                type="number"
+                min={0}
+                max={999}
+                value={editor.courseCreationQuota}
+                onChange={(event) =>
+                  setEditor((state) => ({ ...state, courseCreationQuota: event.target.value }))
+                }
+              />
+              <span className="text-muted-foreground text-xs">
+                该用户名下未删除课程的数量上限（默认 3，删除课程会释放名额）
+              </span>
             </div>
           </div>
           <DialogFooter>

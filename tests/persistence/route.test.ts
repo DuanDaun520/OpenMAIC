@@ -1089,6 +1089,8 @@ describe('embedded persistence route', () => {
         avatarUrl: null,
         nickname: null,
         bio: null,
+        canCreateCourses: true,
+        courseCreationQuota: 3,
       }),
     }));
     vi.doMock('@openmaic/storage/runtime/pg', () => ({
@@ -1143,7 +1145,12 @@ describe('embedded persistence route', () => {
     vi.stubEnv('DATABASE_URL', 'postgres://adapter-test');
     vi.stubEnv('PERSISTENCE_DEV_TOKEN', 'test-token');
     const { handlePersistenceRequest } = await import('@/app/api/persistence/[...path]/route');
-    const pool = { end: vi.fn().mockResolvedValue(undefined) };
+    // query: the route's creation-grant probe confirms the PUT target already
+    // exists (a re-save — the grant gate must not fire for the adapter test).
+    const pool = {
+      query: vi.fn().mockResolvedValue({ rows: [{ '?column?': 1 }] }),
+      end: vi.fn().mockResolvedValue(undefined),
+    };
 
     const put = await handlePersistenceRequest(
       new Request('http://localhost/api/persistence/documents/stage%2Fslash', {

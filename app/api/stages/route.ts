@@ -22,6 +22,7 @@ import { isAgentRuntimeConfigured } from '@/lib/config/feature-flags';
 import type { AppDocumentOutline } from '@/lib/document-store/persistence-types';
 import { apiError } from '@/lib/server/api-response';
 import { getOwnerScopedDocumentStore } from '@/lib/server/agent-runtime/owner-scoped-documents';
+import { getCourseCreationGrant } from '@/lib/server/course-creation-gate';
 import { ownerJson } from '@/lib/server/agent-runtime/route-response';
 import { STAGE_NAME_MAX_LENGTH } from '@/lib/server/agent-runtime/stage-limits';
 import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
@@ -83,6 +84,24 @@ export async function POST(req: NextRequest) {
   return withRequestOwnerId(req, async (ownerId, responseHeaders) => {
     if (ownerId.startsWith('anon:')) {
       return ownerJson({ error: 'login_required' }, 401, responseHeaders);
+    }
+    // Beyond being signed in, creation is grant-bound: the account needs the
+    // admin console's 制作课程 switch AND live-course headroom (mirrors the
+    // persistence route's create gate — this id is always freshly minted, so
+    // no existence check is needed here). Only `user:` owners have an account
+    // row to key the grant; other owner shapes (admin preview cookies, test
+    // partitions) keep the pre-gate behavior.
+    if (ownerId.startsWith('user:')) {
+      const grant = await getCourseCreationGrant(ownerId);
+      if (!grant.allowed) {
+        return ownerJson(
+          {
+            error: grant.reason === 'quota' ? 'course_quota_exceeded' : 'course_creation_forbidden',
+          },
+          403,
+          responseHeaders,
+        );
+      }
     }
 
     const id = createStageId();
