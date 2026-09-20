@@ -30,11 +30,21 @@ vi.stubGlobal('window', { localStorage: localStorageStub });
 // in the KV scope to be picked up.
 const persistKv = new BrowserKVStore({ storage: localStorageStub as unknown as Storage });
 
-async function freshStore(persistedState?: Record<string, unknown>) {
+async function freshStore(persistedState?: Record<string, unknown>, seedVersion?: number) {
   vi.resetModules();
   storage.clear();
   if (persistedState) {
-    await persistKv.set('settings-storage', { state: persistedState, version: 4 }, 'account');
+    // Default seeds at the CURRENT storage version so the assertions below
+    // exercise the plain merge path — an older version would route the partial
+    // blob through the migrate ladder, whose default-config backfill is
+    // allowed to overwrite fields the blob omits (e.g. ttsSpeed). Migration
+    // tests pass an explicit older `seedVersion`.
+    const { SETTINGS_PERSIST_VERSION } = await import('@/lib/store/settings');
+    await persistKv.set(
+      'settings-storage',
+      { state: persistedState, version: seedVersion ?? SETTINGS_PERSIST_VERSION },
+      'account',
+    );
   }
   const { useSettingsStore } = await import('@/lib/store/settings');
   // persist hydrates asynchronously now that it reads through the KVStore —
@@ -160,5 +170,60 @@ describe('Qwen voice/model self-healing', () => {
 
     store.getState().setTTSVoice('vendor-clone-id');
     expect(store.getState().ttsProvidersConfig['qwen-tts']?.modelId).toBe('qwen3-tts-flash');
+  });
+});
+
+describe('v5 migration: default roster becomes preset mode with the full lineup', () => {
+  it('upgrades the old default (auto + trio, never user-set) to preset + all six', async () => {
+    const store = await freshStore(
+      {
+        agentMode: 'auto',
+        selectedAgentIds: ['default-1', 'default-2', 'default-3'],
+        agentSelectionIsUserSet: false,
+      },
+      4,
+    );
+    expect(store.getState().agentMode).toBe('preset');
+    expect(store.getState().selectedAgentIds).toEqual([
+      'default-1',
+      'default-2',
+      'default-3',
+      'default-4',
+      'default-5',
+      'default-6',
+    ]);
+  });
+
+  it('keeps an explicit subset (filtered to default agents) while flipping the mode', async () => {
+    const store = await freshStore(
+      {
+        agentMode: 'auto',
+        selectedAgentIds: ['default-1', 'default-3', 'gen-stale'],
+        agentSelectionIsUserSet: true,
+      },
+      4,
+    );
+    expect(store.getState().agentMode).toBe('preset');
+    expect(store.getState().selectedAgentIds).toEqual(['default-1', 'default-3']);
+  });
+
+  it('falls back to the full lineup when a user-set selection has no default agents left', async () => {
+    const store = await freshStore(
+      {
+        agentMode: 'auto',
+        selectedAgentIds: ['gen-a', 'gen-b'],
+        agentSelectionIsUserSet: true,
+      },
+      4,
+    );
+    expect(store.getState().agentMode).toBe('preset');
+    expect(store.getState().selectedAgentIds).toEqual([
+      'default-1',
+      'default-2',
+      'default-3',
+      'default-4',
+      'default-5',
+      'default-6',
+    ]);
   });
 });

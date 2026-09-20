@@ -59,6 +59,8 @@ const MAX_CONSECUTIVE_UNRESOLVABLE_VISION_IMAGES = 3;
 export async function POST(req: NextRequest) {
   let outlineTitle: string | undefined;
   let resolvedModelString: string | undefined;
+  let requestStageId: string | undefined;
+  let startedAt = Date.now();
   try {
     const body = await req.json();
     const {
@@ -86,6 +88,8 @@ export async function POST(req: NextRequest) {
       languageDirective?: string;
       requirements?: UserRequirements;
     };
+    requestStageId = stageId;
+    startedAt = Date.now();
 
     // Validate required fields
     if (!rawOutline) {
@@ -316,7 +320,9 @@ export async function POST(req: NextRequest) {
 
     // ── Generate content ──
     log.info(
-      `Generating content: "${effectiveOutline.title}" (${effectiveOutline.type}) [model=${modelString}]`,
+      `Generating content: "${effectiveOutline.title}" (${effectiveOutline.type}) ` +
+        `[stage=${stageId}, page=${effectiveOutline.order}/${allOutlines.length}, ` +
+        `model=${modelString}, visionImages=${resolvedVisionImages?.length ?? 0}]`,
     );
 
     const userLocale = req.headers?.get('x-user-locale') ?? '';
@@ -341,7 +347,11 @@ export async function POST(req: NextRequest) {
     });
 
     if (!content) {
-      log.error(`Failed to generate content for: "${effectiveOutline.title}"`);
+      log.error(
+        `Failed to generate content for: "${effectiveOutline.title}" ` +
+          `[stage=${stageId}, page=${effectiveOutline.order}, model=${modelString}, ` +
+          `elapsed=${Date.now() - startedAt}ms]`,
+      );
 
       return apiError(
         'GENERATION_FAILED',
@@ -350,12 +360,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    log.info(`Content generated successfully: "${effectiveOutline.title}"`);
+    log.info(
+      `Content generated successfully: "${effectiveOutline.title}" ` +
+        `[stage=${stageId}, page=${effectiveOutline.order}, elapsed=${Date.now() - startedAt}ms, ` +
+        `content=${JSON.stringify(content).length} chars]`,
+    );
 
     return apiSuccess({ content, effectiveOutline });
   } catch (error) {
     log.error(
-      `Scene content generation failed [scene="${outlineTitle ?? 'unknown'}", model=${resolvedModelString ?? 'unknown'}]:`,
+      `Scene content generation failed [scene="${outlineTitle ?? 'unknown'}", ` +
+        `stage=${requestStageId ?? 'unknown'}, model=${resolvedModelString ?? 'unknown'}, ` +
+        `elapsed=${Date.now() - startedAt}ms]:`,
       error,
     );
     return llmApiError(error);

@@ -86,10 +86,7 @@ interface RoundtableProps {
   readonly currentSceneIndex?: number;
   readonly scenesCount?: number;
   readonly whiteboardOpen?: boolean;
-  readonly sidebarCollapsed?: boolean;
   readonly chatCollapsed?: boolean;
-  readonly onToggleSidebar?: () => void;
-  readonly onToggleChat?: () => void;
   readonly onPrevSlide?: () => void;
   readonly onNextSlide?: () => void;
   readonly onWhiteboardClose?: () => void;
@@ -188,10 +185,7 @@ export function Roundtable({
   currentSceneIndex = 0,
   scenesCount = 1,
   whiteboardOpen = false,
-  sidebarCollapsed,
   chatCollapsed,
-  onToggleSidebar,
-  onToggleChat,
   onPrevSlide,
   onNextSlide,
   onWhiteboardClose,
@@ -622,6 +616,15 @@ export function Roundtable({
   // Intentionally non-reactive: agent metadata is treated as immutable during a classroom session.
   const agentRegistry = useAgentRegistry.getState();
   const getAgentConfig = (id: string) => agentRegistry.getAgent(id);
+  // Localized hover description: preset agents ship translated blurbs in the
+  // locale files; generated (or untranslated) agents fall back to their
+  // stored persona.
+  const getAgentDescription = (id: string | undefined, persona?: string) => {
+    if (!id) return persona || '';
+    const key = `settings.agentDescriptions.${id}`;
+    const localized = t(key);
+    return localized !== key ? localized : persona || '';
+  };
 
   const presentationDiscussionParticipant = discussionRequest
     ? discussionRequest.agentId === teacherParticipant?.id
@@ -681,10 +684,6 @@ export function Roundtable({
       isSoftClosing={isSoftClosing}
       softCloseDeadline={softCloseDeadline}
       whiteboardOpen={whiteboardOpen}
-      sidebarCollapsed={sidebarCollapsed}
-      chatCollapsed={chatCollapsed}
-      onToggleSidebar={onToggleSidebar}
-      onToggleChat={onToggleChat}
       onPrevSlide={onPrevSlide ?? (() => {})}
       onNextSlide={onNextSlide ?? (() => {})}
       onPlayPause={onPlayPause ?? (() => {})}
@@ -1228,6 +1227,10 @@ export function Roundtable({
                 >
                   {(() => {
                     const teacherConfig = getAgentConfig(teacherParticipant?.id || '');
+                    const teacherDescription = getAgentDescription(
+                      teacherParticipant?.id,
+                      teacherConfig?.persona,
+                    );
                     return (
                       <>
                         <div className="flex items-center gap-2">
@@ -1250,9 +1253,9 @@ export function Roundtable({
                             </span>
                           </div>
                         </div>
-                        {teacherConfig?.persona && (
+                        {teacherDescription && (
                           <p className="text-xs text-muted-foreground mt-2 leading-relaxed whitespace-pre-line">
-                            {teacherConfig.persona}
+                            {teacherDescription}
                           </p>
                         )}
                       </>
@@ -1904,11 +1907,7 @@ export function Roundtable({
                     | 'student'
                     | undefined;
                   const roleLabel = roleLabelKey ? t(`settings.agentRoles.${roleLabelKey}`) : '';
-                  const i18nDescription = t(`settings.agentDescriptions.${student.id}`);
-                  const description =
-                    i18nDescription !== `settings.agentDescriptions.${student.id}`
-                      ? i18nDescription
-                      : agentConfig?.persona || '';
+                  const description = getAgentDescription(student.id, agentConfig?.persona);
                   const hasDescription = !!description;
                   const isDiscussionAgent =
                     !!discussionRequest && discussionRequest.agentId === student.id;

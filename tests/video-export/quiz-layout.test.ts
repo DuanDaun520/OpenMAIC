@@ -31,8 +31,8 @@ describe('app-side Quiz layout probe', () => {
       },
       width: 1280,
       height: 720,
-      locale: 'ar-SA',
-      labels: getVideoExportCoverLabels('ar-SA'),
+      locale: 'zh-CN',
+      labels: getVideoExportCoverLabels('zh-CN'),
     });
     const plan = planQuizScriptFonts([surface.html]);
     const normalizeBase = (css: string) =>

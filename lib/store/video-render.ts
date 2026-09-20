@@ -28,7 +28,7 @@ import {
   type VideoQuality,
   type VideoResolution,
 } from '@/lib/video-export-app/export-options';
-import type { Locale } from '@/lib/i18n';
+import type { ExportLocale } from '@/lib/video-export-app/cover-config';
 import { useStageStore } from '@/lib/store/stage';
 import { observeExportChanges } from '@/lib/video-export-app/observe-export-changes';
 import { resolveExportStageName } from '@/lib/video-export-app/resolve-stage-name';
@@ -100,7 +100,7 @@ interface VideoRenderState {
   /** True while a render is in flight (compiling or rendering). */
   isActive: () => boolean;
   /** `locale` is the export's, not the store's: it is baked into the emitted card chrome. */
-  startRender: (t: Translate, locale: Locale) => Promise<void>;
+  startRender: (t: Translate, locale: ExportLocale) => Promise<void>;
   reset: () => void;
 }
 
@@ -114,7 +114,7 @@ let cachedZip: {
   stageId: string;
   resolution: VideoResolution;
   burnInSubtitles: boolean;
-  locale: Locale;
+  locale: ExportLocale;
   result: BuildExportZipResult;
 } | null = null;
 let exportRevision = 0;

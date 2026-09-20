@@ -7,8 +7,10 @@ import {
   Play,
   Pause,
   PencilLine,
-  LayoutList,
-  MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Volume1,
   Volume2,
   VolumeX,
@@ -18,7 +20,7 @@ import {
   Quote,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useStageStore } from '@/lib/store';
+import { useStageStore, useSettingsStore } from '@/lib/store';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useSoftCloseCountdown } from '@/components/chat/use-soft-close-countdown';
@@ -31,10 +33,6 @@ export interface CanvasToolbarProps {
   readonly isSoftClosing?: boolean;
   readonly softCloseDeadline?: number;
   readonly whiteboardOpen: boolean;
-  readonly sidebarCollapsed?: boolean;
-  readonly chatCollapsed?: boolean;
-  readonly onToggleSidebar?: () => void;
-  readonly onToggleChat?: () => void;
   readonly onPrevSlide: () => void;
   readonly onNextSlide: () => void;
   readonly onPlayPause: () => void;
@@ -97,10 +95,6 @@ export function CanvasToolbar({
   isSoftClosing,
   softCloseDeadline,
   whiteboardOpen,
-  sidebarCollapsed,
-  chatCollapsed,
-  onToggleSidebar,
-  onToggleChat,
   onPrevSlide,
   onNextSlide,
   onPlayPause,
@@ -127,6 +121,13 @@ export function CanvasToolbar({
 }: CanvasToolbarProps) {
   const { t } = useI18n();
   const remainingSoftCloseSeconds = useSoftCloseCountdown(softCloseDeadline);
+  // Panel collapse state lives in the persisted settings store — the toolbar
+  // reads/writes it directly, mirroring the header's top control bar so both
+  // ends of the classroom can expand/collapse the side panels.
+  const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
+  const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
+  const chatCollapsed = useSettingsStore((s) => s.chatAreaCollapsed);
+  const setChatAreaCollapsed = useSettingsStore((s) => s.setChatAreaCollapsed);
   const canGoPrev = currentSceneIndex > 0;
   const canGoNext = currentSceneIndex < scenesCount - 1;
   const showPlayPause = !isLiveSession;
@@ -158,23 +159,26 @@ export function CanvasToolbar({
 
   return (
     <div className={cn('flex items-center gap-2', className)}>
-      {/* ── Left: sidebar toggle + page indicator ── */}
+      {/* ── Left: page-list toggle + page indicator ── */}
       <div className="flex items-center gap-1 shrink-0 pl-1">
-        {onToggleSidebar && (
-          <button
-            onClick={onToggleSidebar}
-            className={cn(
-              ctrlBtn,
-              'w-6 h-6',
-              sidebarCollapsed
-                ? 'text-gray-400 dark:text-gray-500'
-                : 'text-gray-600 dark:text-gray-300',
-            )}
-            aria-label="Toggle sidebar"
-          >
-            <LayoutList className="w-3.5 h-3.5" />
-          </button>
-        )}
+        <button
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          className={cn(
+            ctrlBtn,
+            'w-6 h-6',
+            sidebarCollapsed
+              ? 'text-gray-400 dark:text-gray-500'
+              : 'text-gray-600 dark:text-gray-300',
+          )}
+          aria-label={t('stage.togglePageList')}
+          title={t('stage.togglePageList')}
+        >
+          {sidebarCollapsed ? (
+            <PanelLeftOpen className="w-3.5 h-3.5" />
+          ) : (
+            <PanelLeftClose className="w-3.5 h-3.5" />
+          )}
+        </button>
         <span className="text-[11px] text-gray-400 dark:text-gray-500 tabular-nums select-none font-medium">
           {currentSceneIndex + 1}
           <span className="opacity-35 mx-px">/</span>
@@ -457,9 +461,25 @@ export function CanvasToolbar({
         </div>
       </div>
 
-      {/* ── Right: fullscreen + chat toggle ── */}
+      {/* ── Right: chat toggle + fullscreen ── */}
       <div className="flex items-center justify-end gap-px shrink-0 pr-1">
         <CtrlDivider />
+        <button
+          onClick={() => setChatAreaCollapsed(!chatCollapsed)}
+          className={cn(
+            ctrlBtn,
+            'w-6 h-6',
+            chatCollapsed ? 'text-gray-400 dark:text-gray-500' : 'text-gray-600 dark:text-gray-300',
+          )}
+          aria-label={t('stage.toggleChatPanel')}
+          title={t('stage.toggleChatPanel')}
+        >
+          {chatCollapsed ? (
+            <PanelRightOpen className="w-3.5 h-3.5" />
+          ) : (
+            <PanelRightClose className="w-3.5 h-3.5" />
+          )}
+        </button>
         {onTogglePresentation && (
           <button
             onClick={onTogglePresentation}
@@ -478,21 +498,6 @@ export function CanvasToolbar({
             ) : (
               <Maximize2 className="w-3.5 h-3.5" />
             )}
-          </button>
-        )}
-        {onToggleChat && (
-          <button
-            onClick={onToggleChat}
-            className={cn(
-              ctrlBtn,
-              'w-6 h-6',
-              chatCollapsed
-                ? 'text-gray-400 dark:text-gray-500'
-                : 'text-gray-600 dark:text-gray-300',
-            )}
-            aria-label="Toggle chat"
-          >
-            <MessageSquare className="w-3.5 h-3.5" />
           </button>
         )}
       </div>

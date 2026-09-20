@@ -19,6 +19,7 @@ import {
   normalizeVoxCPMBackend,
   voxCPMBackendSupportsReferenceAudio,
 } from '@/lib/audio/voxcpm';
+import { mergeProviderVoiceOverrides } from '@/lib/audio/voice-overrides-client';
 
 export interface ResolvedVoice {
   providerId: TTSProviderId;
@@ -266,7 +267,10 @@ export function getEnabledProvidersWithVoices(
   for (const [id, config] of Object.entries(TTS_PROVIDERS)) {
     const providerId = id as TTSProviderId;
     if (providerId === 'browser-native-tts') continue;
-    if (config.voices.length === 0) continue;
+    // Admin-curated overlay first: renames / re-gendering / hidden voices /
+    // custom additions. An empty overlay returns the presets untouched.
+    const registryVoices = mergeProviderVoiceOverrides(providerId, config.voices);
+    if (registryVoices.length === 0) continue;
 
     const providerConfig = ttsProvidersConfig[providerId];
     if (!isTTSProviderEnabled(providerId, providerConfig)) continue;
@@ -298,7 +302,7 @@ export function getEnabledProvidersWithVoices(
 
     {
       const allVoices = [
-        ...config.voices.map((v) => ({
+        ...registryVoices.map((v) => ({
           id: v.id,
           name: v.name,
           language: v.language,
@@ -313,7 +317,7 @@ export function getEnabledProvidersWithVoices(
           const compatibleVoices =
             providerId === 'qwen-tts' && isQwenVoiceCloneModel(model.id)
               ? []
-              : config.voices
+              : registryVoices
                   .filter((v) => !v.compatibleModels || v.compatibleModels.includes(model.id))
                   .map((v) => ({ id: v.id, name: v.name, language: v.language }));
           if (providerId === VOXCPM_TTS_PROVIDER_ID) {
@@ -414,7 +418,8 @@ export function getSelectableProvidersWithVoices(
 }
 
 /**
- * Find a voice display name across all providers.
+ * Find a voice display name across all providers. Builtin providers honor the
+ * admin overlay's rename (and additions) so labels match the picker.
  */
 export function findVoiceDisplayName(
   providerId: TTSProviderId,
@@ -434,6 +439,8 @@ export function findVoiceDisplayName(
     ? TTS_PROVIDERS[providerId as keyof typeof TTS_PROVIDERS]
     : undefined;
   if (!provider) return voiceId;
-  const voice = provider.voices.find((v) => v.id === voiceId);
+  const voice = mergeProviderVoiceOverrides(providerId, provider.voices).find(
+    (v) => v.id === voiceId,
+  );
   return voice?.name ?? voiceId;
 }

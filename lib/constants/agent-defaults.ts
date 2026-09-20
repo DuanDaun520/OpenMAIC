@@ -37,4 +37,11 @@ export const AGENT_DEFAULT_AVATARS = [
   '/avatars/curious-2.png',
   '/avatars/thinker-2.png',
   '/avatars/note-taker-2.png',
+  '/avatars/teacher-3.png',
+  '/avatars/assist-3.png',
+  '/avatars/student-1.png',
+  '/avatars/student-2.png',
+  '/avatars/student-3.png',
+  '/avatars/student-4.png',
+  '/avatars/teacher-3-f.png',
 ] as const;

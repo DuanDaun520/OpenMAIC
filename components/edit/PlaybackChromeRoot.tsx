@@ -145,6 +145,8 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
     } = useStageStore();
     const failedOutlines = useStageStore.use.failedOutlines();
     const generationComplete = useStageStore.use.generationComplete();
+    const generationError = useStageStore.use.generationError();
+    const generationInterrupted = useStageStore.use.generationInterrupted();
 
     const currentScene = getCurrentScene();
     const piChatEnabled = isPiChatEnabled();
@@ -1596,7 +1598,6 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
       >
         <SceneSidebar
           collapsed={sidebarCollapsed}
-          onCollapseChange={setSidebarCollapsed}
           onSceneSelect={gatedSceneSwitch}
           onRetryOutline={onRetryOutline}
           isCourseComplete={isCourseComplete}
@@ -1609,6 +1610,9 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
             before the parent flips mode to 'edit'. */}
           {!isPresenting && !hideHeader && (
             <Header
+              courseTitle={stage?.name || ''}
+              currentPage={Math.max(currentSceneIndex + 1, 1)}
+              totalPages={totalScenesCount}
               currentSceneTitle={
                 currentScene?.title ||
                 (isCourseComplete && isPendingScene ? t('stage.courseComplete') : '')
@@ -1650,10 +1654,6 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
               isSoftClosing={chatIsSoftClosing}
               softCloseDeadline={softCloseDeadline}
               whiteboardOpen={whiteboardOpen}
-              sidebarCollapsed={sidebarCollapsed}
-              chatCollapsed={chatAreaCollapsed}
-              onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
-              onToggleChat={() => setChatAreaCollapsed(!chatAreaCollapsed)}
               onPrevSlide={handlePreviousScene}
               onNextSlide={handleNextScene}
               onPlayPause={handlePlayPause}
@@ -1679,6 +1679,8 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
               isGenerationFailed={
                 isPendingScene && failedOutlines.some((f) => f.id === generatingOutlines[0]?.id)
               }
+              generationErrorText={generationError ?? undefined}
+              generationInterrupted={generationInterrupted}
               onRetryGeneration={
                 onRetryOutline && generatingOutlines[0]
                   ? () => onRetryOutline(generatingOutlines[0].id)
@@ -1831,10 +1833,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                 currentSceneIndex={currentSceneIndex}
                 scenesCount={totalScenesCount}
                 whiteboardOpen={whiteboardOpen}
-                sidebarCollapsed={sidebarCollapsed}
                 chatCollapsed={chatAreaCollapsed}
-                onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
-                onToggleChat={() => setChatAreaCollapsed(!chatAreaCollapsed)}
                 onPrevSlide={handlePreviousScene}
                 onNextSlide={handleNextScene}
                 onWhiteboardClose={handleWhiteboardToggle}

@@ -8,6 +8,13 @@ import type { BaiduSubSources, WebSearchProviderId, WebSearchProviderConfig } fr
  * Web Search Provider Registry
  */
 export const WEB_SEARCH_PROVIDERS: Record<WebSearchProviderId, WebSearchProviderConfig> = {
+  serpbase: {
+    id: 'serpbase',
+    name: 'SerpBase',
+    requiresApiKey: true,
+    defaultBaseUrl: 'https://api.serpbase.dev',
+    endpointPath: '/google/search',
+  },
   tavily: {
     id: 'tavily',
     name: 'Tavily',

@@ -22,7 +22,7 @@ import {
   createQuizQuestionListMeasurementSurface,
   measureQuizQuestionList,
 } from '@/lib/video-export-app/quiz-layout';
-import type { Locale } from '@/lib/i18n';
+import type { ExportLocale } from '@/lib/video-export-app/cover-config';
 import { NO_ASSETS, NO_PROBE, speech } from './helpers';
 import {
   QUIZ_SCROLL_LAYOUT_720P,
@@ -126,7 +126,7 @@ const MAX_UNICODE_CTA = resolveVideoExportCta(MAX_UNICODE_CTA_RAW)!;
 
 interface CoverOptions {
   kind: 'quiz' | 'pbl';
-  locale: Locale;
+  locale: ExportLocale;
   cta: VideoExportCta;
   burnInSubtitles?: boolean;
 }
@@ -265,7 +265,7 @@ function quizListHtml(
 const SCRIPT_FONT_MATRIX = [
   {
     name: 'Cyrillic',
-    locale: 'ru-RU' as Locale,
+    locale: 'ru-RU' as ExportLocale,
     family: 'OpenMAIC Noto Sans Cyrillic',
     text: 'Привет Ёж Ԁ',
     expectedFontFiles: [
@@ -275,7 +275,7 @@ const SCRIPT_FONT_MATRIX = [
   },
   {
     name: 'Arabic',
-    locale: 'ar-SA' as Locale,
+    locale: 'ar-SA' as ExportLocale,
     family: 'OpenMAIC Noto Sans Arabic',
     text: 'العربية',
     expectedFontFiles: ['noto-sans-arabic-arabic-400-normal.woff2'],
@@ -492,7 +492,7 @@ interface Scenario {
   name: string;
   kind: 'quiz' | 'pbl';
   frame: keyof typeof FRAMES;
-  locale: Locale;
+  locale: ExportLocale;
   content: CoverContent;
   cta: VideoExportCta;
   titleDirection: 'ltr' | 'rtl';

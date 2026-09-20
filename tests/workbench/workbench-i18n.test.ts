@@ -10,7 +10,7 @@ const en = createWorkbenchTranslator('en-US');
 
 // Upstream adaptation: the reference's `workbench locale presentation` block
 // drove `presentTool` from `components/workbench/chat/tool-presentation` (the
-// workbench UI slice, not ported here) — dropped. The twelve-locale contract,
+// workbench UI slice, not ported here) — dropped. The two-locale contract,
 // the built-in skill names and the hardcoded-copy sweep below are all kept,
 // and the two pure translator checks from that block survive in their own
 // describe below.
@@ -32,14 +32,11 @@ const interpolations = (value: string): string[] =>
   [...value.matchAll(/\{\{(\w+)\}\}/g)].map((match) => match[1]).sort();
 
 describe('workbench translator locales', () => {
-  it('translates the other ten locales rather than falling back to English', () => {
-    expect(createWorkbenchTranslator('fr-FR')('workbench.tool.label.webSearch')).toBe(
-      'Rechercher sur le web',
+  it('translates the two shipped locales rather than falling back to the key', () => {
+    expect(createWorkbenchTranslator('en-US')('workbench.tool.label.webSearch')).toBe(
+      'Search the web',
     );
-    expect(createWorkbenchTranslator('de-DE')('workbench.tool.label.webSearch')).toBe(
-      'Im Web suchen',
-    );
-    expect(createWorkbenchTranslator('zh-TW')('workbench.tool.label.webSearch')).toBe('聯網搜尋');
+    expect(createWorkbenchTranslator('zh-CN')('workbench.tool.label.webSearch')).toBe('联网搜索');
   });
 
   it('keeps an unknown locale on the English map instead of on the key', () => {
@@ -50,7 +47,7 @@ describe('workbench translator locales', () => {
 });
 
 /**
- * The twelve-locale contract. `workbenchEn` is the shape; every locale must
+ * The two-locale contract. `workbenchEn` is the shape; every locale must
  * resolve every one of its keys to a real sentence with the same interpolation
  * variables — a missing key would render as `workbench.tool.label.x` on a card,
  * and a dropped `{{order}}` would render a page number that is not there.
@@ -58,8 +55,8 @@ describe('workbench translator locales', () => {
 describe('workbench copy covers every supported locale', () => {
   const source = flatten(workbenchEn);
 
-  it('has twelve locales to check', () => {
-    expect(supportedLocales.length).toBe(12);
+  it('has two locales to check', () => {
+    expect(supportedLocales.length).toBe(2);
     expect(source.size).toBeGreaterThanOrEqual(200);
   });
 
@@ -74,34 +71,6 @@ describe('workbench copy covers every supported locale', () => {
       expect(interpolations(value), `${code}.${key} changed its interpolations`).toEqual(
         interpolations(source.get(key)!),
       );
-    }
-  });
-
-  it('keeps every overlay tool key set exactly equal to the base', () => {
-    // The "%s is complete" checks above assert on workbenchResourceFor(code),
-    // which merges the overlay INTO the base first. A key missing from one
-    // overlay therefore silently resolves to the base sentence and nothing
-    // fails — the exact gap observed when zh-TW dropped a tool.label key and
-    // the suite stayed green. This check holds each overlay FILE itself to the
-    // base shape: no missing and no extra `tool.*` key, so a locale that was
-    // never translated (or a label key dropped in one locale) turns red.
-    const overlaysDir = path.join(process.cwd(), 'lib/i18n/workbench-locales');
-    const baseToolKeys = [...flatten(workbenchEn).keys()].filter((key) => key.startsWith('tool.'));
-    const files = fs
-      .readdirSync(overlaysDir)
-      .filter((file) => file.endsWith('.json'))
-      .sort();
-    expect(files.length).toBeGreaterThanOrEqual(10);
-    for (const file of files) {
-      const overlay = JSON.parse(fs.readFileSync(path.join(overlaysDir, file), 'utf8')) as Record<
-        string,
-        unknown
-      >;
-      const overlayToolKeys = [...flatten(overlay).keys()].filter((key) => key.startsWith('tool.'));
-      const missing = baseToolKeys.filter((key) => !overlayToolKeys.includes(key));
-      const extra = overlayToolKeys.filter((key) => !baseToolKeys.includes(key));
-      expect(missing, `${file} is missing tool keys the base has`).toEqual([]);
-      expect(extra, `${file} has tool keys the base does not`).toEqual([]);
     }
   });
 });

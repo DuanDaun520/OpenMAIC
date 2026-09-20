@@ -321,7 +321,8 @@ describe('POST /api/generate/tts route handling of invalid responses (#1395)', (
     expect(json.audioId).toBe('audio-test-456');
     expect(json.base64).toBeDefined();
 
-    // Billing usage recorded on success
+    // Billing usage recorded on success (owner unattributable: no cookie in
+    // this request, so the actor dimension is present but undefined)
     expect(mockRecordGenerationUsage).toHaveBeenCalledTimes(1);
     expect(mockRecordGenerationUsage).toHaveBeenCalledWith({
       kind: 'tts',
@@ -329,6 +330,7 @@ describe('POST /api/generate/tts route handling of invalid responses (#1395)', (
       providerId: 'openai-tts',
       modelId: 'tts-1',
       quantity: 11,
+      actor: { ownerId: undefined },
     });
   });
 });

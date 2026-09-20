@@ -330,6 +330,22 @@ export async function handlePersistenceRequest(
     try {
       const path = routeRelativePath(request);
       const action = parseDocumentAction(request.method, path);
+      // Course creation is account-bound: a documents-create from an anonymous
+      // partition is refused with 401, mirroring POST /api/stages (the home
+      // gate prompts login before the request is even sent; this is the
+      // server-side backstop). Everything else keeps its anonymous behavior —
+      // reads, writes to documents the partition already owns, sessions, and
+      // assets — so a pre-account anonymous partition stays fully servable
+      // until a login claims it.
+      if (action.kind === 'create' && ownerId.startsWith('anon:')) {
+        const response = jsonError(
+          401,
+          'LOGIN_REQUIRED',
+          'creating a course requires a signed-in account',
+        );
+        for (const [name, value] of responseHeaders.entries()) response.headers.append(name, value);
+        return response;
+      }
       let access: DocumentAccess = 'allow';
       if (path === '/documents' || path.startsWith('/documents/')) {
         const { pool } = await getServerPersistenceProvider(connectionString, deps.poolFactory);

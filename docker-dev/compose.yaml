@@ -1,0 +1,75 @@
+# OpenMAIC 本地开发基础设施 —— 用 OrbStack 统一管理本项目全部容器。
+#   启动: docker compose up -d      (在本目录执行)
+#   停止: docker compose down       (数据保留在命名卷中)
+#
+# 端口:
+#   5434 -> PostgreSQL 18  (本机 5432 已被 Homebrew Postgres 占用,5433 被 WeKnora 占用;
+#                          与远程库版本保持一致,便于 pg_dump/pg_restore 直迁)
+#   9200 -> MinIO S3 API   (openmaic-assets 桶)
+#   9201 -> MinIO 控制台    (openmaic / openmaic-dev-secret)
+name: openmaic-dev
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: openmaic-dev-postgres
+    ports:
+      - '5434:5432'
+    environment:
+      POSTGRES_DB: openmaic
+      POSTGRES_USER: openmaic
+      # 仅本地开发默认口令;如需修改请同步 .env.local 的 DATABASE_URL。
+      POSTGRES_PASSWORD: openmaic-dev
+    volumes:
+      # PG18 镜像约定:卷挂 /var/lib/postgresql(不再是其 data 子目录),
+      # 否则 initdb 拒绝启动。
+      - pg-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U openmaic -d openmaic']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  minio:
+    image: minio/minio:latest
+    container_name: openmaic-dev-minio
+    ports:
+      - '9200:9000'
+      - '9201:9001'
+    environment:
+      MINIO_ROOT_USER: openmaic
+      MINIO_ROOT_PASSWORD: openmaic-dev-secret
+      # AWS SDK 对自定义端点默认走虚拟主机式寻址(bucket.localhost:port)。
+      # 不设置该项时 MinIO 只认路径式,SDK 会报 MalformedXML。
+      MINIO_DOMAIN: localhost
+    command: server /data --console-address ':9001'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      # 容器内置的 `local` 别名持默认凭据,`mc ready` 不校验真实账号 —— 改用
+      # 实际 ROOT 凭据探测,凭据配错时能真正报不健康($$ 为 compose 转义)。
+      test:
+        [
+          'CMD-SHELL',
+          'mc alias set probe http://127.0.0.1:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD >/dev/null && mc ready probe',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # 一次性初始化:建桶后退出。桶需与 .env.local 的 ASSET_S3_BUCKET 一致。
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 openmaic openmaic-dev-secret &&
+      mc mb --ignore-existing local/openmaic-assets &&
+      echo 'bucket openmaic-assets ready'
+      "
+
+volumes:
+  pg-data:
+  minio-data:

@@ -806,7 +806,7 @@ export class PlaybackEngine {
     const voices = await this.ensureVoicesLoaded();
     if (!this.isCurrentGeneration(generation)) return;
 
-    // Set voice: try user's configured voice, fall back to auto-detect language
+    // Set voice: try user's configured voice, fall back to a pinned auto-pick
     let voiceFound = false;
     if (settings.ttsVoice && settings.ttsVoice !== 'default') {
       const voice = voices.find((v) => v.voiceURI === settings.ttsVoice);
@@ -823,7 +823,17 @@ export class PlaybackEngine {
         chunkText.length > 0
           ? (chunkText.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length / chunkText.length
           : 0;
-      utterance.lang = cjkRatio > CJK_LANG_THRESHOLD ? 'zh-CN' : 'en-US';
+      const lang = cjkRatio > CJK_LANG_THRESHOLD ? 'zh-CN' : 'en-US';
+      // Pin ONE browser voice for the language. Setting only `lang` lets the
+      // browser re-select a voice per utterance, which can flip the narrator
+      // between male and female voices across the pages of one course.
+      const pinned = this.pickAutoBrowserVoice(voices, lang);
+      if (pinned) {
+        utterance.voice = pinned;
+        utterance.lang = pinned.lang;
+      } else {
+        utterance.lang = lang;
+      }
     }
 
     utterance.onend = () => {
@@ -859,6 +869,35 @@ export class PlaybackEngine {
    * Caches result so subsequent calls return immediately.
    */
   private cachedVoices: SpeechSynthesisVoice[] | null = null;
+
+  /**
+   * The auto-picked browser voice per language tag, pinned for this engine's
+   * lifetime. Without the pin the browser chooses a voice per utterance, so
+   * the same course's narration can switch gender mid-deck.
+   */
+  private autoVoiceByLang = new Map<string, SpeechSynthesisVoice>();
+
+  /**
+   * Deterministically pick one voice for `lang` (exact match first, then the
+   * primary-language prefix) and reuse it for every later utterance in that
+   * language — the browser's own auto-selection is per-utterance and not
+   * stable. Returns undefined when no voice matches; the caller then sets
+   * `utterance.lang` alone and accepts the browser's pick.
+   */
+  private pickAutoBrowserVoice(
+    voices: SpeechSynthesisVoice[],
+    lang: string,
+  ): SpeechSynthesisVoice | undefined {
+    const pinned = this.autoVoiceByLang.get(lang);
+    if (pinned && voices.includes(pinned)) return pinned;
+
+    const primary = lang.split('-')[0].toLowerCase();
+    const match =
+      voices.find((v) => v.lang === lang) ??
+      voices.find((v) => v.lang.toLowerCase().split('-')[0] === primary);
+    if (match) this.autoVoiceByLang.set(lang, match);
+    return match;
+  }
   private async ensureVoicesLoaded(): Promise<SpeechSynthesisVoice[]> {
     if (this.cachedVoices && this.cachedVoices.length > 0) {
       return this.cachedVoices;

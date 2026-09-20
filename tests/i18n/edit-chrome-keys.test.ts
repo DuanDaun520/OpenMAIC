@@ -2,18 +2,8 @@ import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { workbenchResourceFor } from '@/lib/i18n/workbench';
-import arSA from '@/lib/i18n/locales/ar-SA.json';
-import deDE from '@/lib/i18n/locales/de-DE.json';
 import enUS from '@/lib/i18n/locales/en-US.json';
-import esMX from '@/lib/i18n/locales/es-MX.json';
-import frFR from '@/lib/i18n/locales/fr-FR.json';
-import jaJP from '@/lib/i18n/locales/ja-JP.json';
-import koKR from '@/lib/i18n/locales/ko-KR.json';
-import ptBR from '@/lib/i18n/locales/pt-BR.json';
-import ruRU from '@/lib/i18n/locales/ru-RU.json';
-import viVN from '@/lib/i18n/locales/vi-VN.json';
 import zhCN from '@/lib/i18n/locales/zh-CN.json';
-import zhTW from '@/lib/i18n/locales/zh-TW.json';
 
 /**
  * Guard for the editor-chrome locale contract.
@@ -53,18 +43,8 @@ const SCENE_TYPE_VALUES = ['slide', 'quiz', 'interactive', 'pbl'] as const;
 const FONT_LABEL_KEYS = ['edit.text.fontDefault'] as const;
 
 const LOCALE_RESOURCES: Record<string, unknown> = {
-  'ar-SA': arSA,
-  'de-DE': deDE,
   'en-US': enUS,
-  'es-MX': esMX,
-  'fr-FR': frFR,
-  'ja-JP': jaJP,
-  'ko-KR': koKR,
-  'pt-BR': ptBR,
-  'ru-RU': ruRU,
-  'vi-VN': viVN,
   'zh-CN': zhCN,
-  'zh-TW': zhTW,
 };
 
 const LOCALES = Object.keys(LOCALE_RESOURCES);
@@ -183,8 +163,9 @@ describe('editor chrome i18n keys', () => {
 
   it('finds a non-trivial set of keys to guard', () => {
     // Sanity: the scan must actually see the chrome's copy calls, including the
-    // keys the acceptance test found leaking.
-    expect(keys).toContain('edit.roster.shortTitle');
+    // keys the acceptance test found leaking. (edit.roster.shortTitle left the
+    // chrome with the hidden 阵容 button; edit.undo is a stable CommandBar key.)
+    expect(keys).toContain('edit.undo');
     expect(keys).toContain('edit.elementRef.startPicking');
     expect(keys).toContain('edit.elementRef.exitPicking');
     expect(keys.length).toBeGreaterThan(100);

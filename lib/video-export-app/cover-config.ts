@@ -1,16 +1,6 @@
 import type { Locale } from '@/lib/i18n';
-import arSA from '@/lib/i18n/locales/ar-SA.json';
-import deDE from '@/lib/i18n/locales/de-DE.json';
 import enUS from '@/lib/i18n/locales/en-US.json';
-import esMX from '@/lib/i18n/locales/es-MX.json';
-import frFR from '@/lib/i18n/locales/fr-FR.json';
-import jaJP from '@/lib/i18n/locales/ja-JP.json';
-import koKR from '@/lib/i18n/locales/ko-KR.json';
-import ptBR from '@/lib/i18n/locales/pt-BR.json';
-import ruRU from '@/lib/i18n/locales/ru-RU.json';
-import viVN from '@/lib/i18n/locales/vi-VN.json';
 import zhCN from '@/lib/i18n/locales/zh-CN.json';
-import zhTW from '@/lib/i18n/locales/zh-TW.json';
 import type { VideoExportLabels, VideoExportCta } from '@/lib/video-export';
 
 const DEFAULT_DESTINATION = 'open.maic.chat';
@@ -44,20 +34,18 @@ function normalizePercentHexCase(value: string): string {
   return value.replace(/%[\da-f]{2}/gi, (encoded) => encoded.toUpperCase());
 }
 
-const LOCALE_RESOURCES: Record<Locale, Record<string, unknown>> = {
+const LOCALE_RESOURCES: Record<string, Record<string, unknown>> = {
   'en-US': enUS,
   'zh-CN': zhCN,
-  'zh-TW': zhTW,
-  'ja-JP': jaJP,
-  'ko-KR': koKR,
-  'es-MX': esMX,
-  'fr-FR': frFR,
-  'vi-VN': viVN,
-  'pt-BR': ptBR,
-  'ru-RU': ruRU,
-  'ar-SA': arSA,
-  'de-DE': deDE,
 };
+
+/**
+ * The export renderer's locale hint. The UI registry only ships zh-CN/en-US,
+ * but the renderer's direction and font planning are script-driven and stay
+ * generic — any BCP-47 tag is accepted here, with chrome labels falling back
+ * to English for tags outside the registry.
+ */
+export type ExportLocale = Locale | (string & {});
 
 /**
  * Resolve an environment-provided CTA destination without reading environment
@@ -177,8 +165,8 @@ export function resolveVideoExportCta(raw: string | undefined): VideoExportCta |
 }
 
 /** Resolve every learner-facing cover label synchronously for one export locale. */
-export function getVideoExportCoverLabels(locale: Locale): VideoExportLabels {
-  const resource = LOCALE_RESOURCES[locale];
+export function getVideoExportCoverLabels(locale: ExportLocale): VideoExportLabels {
+  const resource = LOCALE_RESOURCES[locale] ?? LOCALE_RESOURCES['en-US'];
   const at = (key: string): string => {
     const value = key.split('.').reduce<unknown>((current, part) => {
       if (!current || typeof current !== 'object') return undefined;

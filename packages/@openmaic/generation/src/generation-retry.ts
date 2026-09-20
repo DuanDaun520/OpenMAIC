@@ -108,7 +108,11 @@ function messageFrom(value: unknown): string {
 
 function retryableByMessage(value: unknown): boolean {
   const message = messageFrom(value);
-  return /rate limit|too many requests|timeout|timed out|fetch failed|network|ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|ENOTFOUND|EPIPE|socket hang up/i.test(
+  // `fetch failed` is Node/undici's wording; browsers phrase the same
+  // network-level failure as "Failed to fetch" (Chromium/Firefox TypeError)
+  // or "Load failed" (Safari). All three are transient by nature — without
+  // them here, a single dropped connection fails the scene on attempt 1.
+  return /rate limit|too many requests|timeout|timed out|fetch failed|failed to fetch|load failed|network|ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|ENOTFOUND|EPIPE|socket hang up/i.test(
     message,
   );
 }

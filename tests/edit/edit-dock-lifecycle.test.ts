@@ -66,15 +66,6 @@ vi.mock('@/components/edit/ActionsBar/ActionsBar', async () => {
   };
   return { ActionsBar };
 });
-// The roster editor reads the whole stage document; the dock only owes it a mount
-// point, so it is stubbed down to a marker.
-vi.mock('@/components/edit/AgentsView/RosterDialog', async () => {
-  const { createElement: h } = await import('react');
-  return {
-    RosterDialog: ({ open }: { open: boolean }) =>
-      open ? h('div', { 'data-testid': 'roster-dialog' }) : null,
-  };
-});
 
 import { EditDock } from '@/components/edit/EditDock/EditDock';
 import { useStageStore } from '@/lib/store/stage';
@@ -152,12 +143,13 @@ describe('EditDock structure', () => {
     expect(lifecycle.timelineMounts).toBe(1);
   });
 
-  it('offers the roster on every scene type, from the bar', async () => {
+  it('hides the roster entry from the bar, on every scene type', async () => {
+    // The 阵容 (roster) button is hidden by the course-page redesign for
+    // now — nothing may render it or its dialog.
     const host = await renderDock({ sceneType: 'quiz' });
 
-    expect(host.querySelector('[data-testid="edit-dock-roster"]')).not.toBeNull();
-    await click(host.querySelector('[data-testid="edit-dock-roster"]'));
-    expect(host.querySelector('[data-testid="roster-dialog"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="edit-dock-roster"]')).toBeNull();
+    expect(host.querySelector('[data-testid="roster-dialog"]')).toBeNull();
   });
 });
 
@@ -297,7 +289,6 @@ describe('EditDock fold', () => {
     // 86 collapsed timeline + 36 bar: folding never folds the bar away.
     expect(section.style.height).toBe('122px');
     expect(host.querySelector('[data-testid="edit-dock-bar"]')).not.toBeNull();
-    expect(host.querySelector('[data-testid="edit-dock-roster"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="element-ref-arm"]')).not.toBeNull();
     expect(
       host.querySelector('[data-testid="timeline-body"]')?.getAttribute('data-collapsed'),
@@ -312,7 +303,6 @@ describe('EditDock fold', () => {
     await click(host.querySelector('[data-testid="tts-batch"]'));
 
     await click(host.querySelector('[data-testid="element-ref-arm"]'));
-    await click(host.querySelector('[data-testid="edit-dock-roster"]'));
     await click(host.querySelector('[data-testid="timeline-fold"]'));
     await click(host.querySelector('[data-testid="timeline-fold"]'));
 

@@ -29,6 +29,8 @@ import {
 import type { ImageProviderId, ImageGenerationOptions } from '@/lib/media/types';
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { quotaGateForRequest } from '@/lib/admin/quota';
+import { readAuthAwareOwnerId } from '@/lib/server/agent-runtime/auth-owner';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
 import { resolveImageSize } from '@/lib/server/image-sizing';
 
@@ -42,6 +44,11 @@ const log = createLogger('ImageGeneration API');
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
+  // Quota gate: a no-op unless enforcement is double-switched on (env flag +
+  // console policy). See lib/admin/quota.ts.
+  const quotaGate = await quotaGateForRequest(request);
+  if (quotaGate) return quotaGate;
+
   try {
     const body = (await request.json()) as ImageGenerationOptions;
 
@@ -116,6 +123,7 @@ export async function POST(request: NextRequest) {
       providerId,
       modelId: model,
       quantity: 1,
+      actor: { ownerId: await readAuthAwareOwnerId(request) },
     });
 
     return apiSuccess({ result });

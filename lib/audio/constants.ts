@@ -900,6 +900,21 @@ export const TTS_PROVIDERS: Record<BuiltInTTSProviderId, TTSProviderConfig> = {
         language: 'en-US',
         gender: 'female',
       },
+      // 大模型语音合成（volc.service_type.10029）授权的音色——与上方 uranus 系列
+      // （Seed-TTS 2.0 授权）分属不同产品，混用会报 55000000 speaker/resource 不匹配。
+      // 以下音色已实测可用；如需更多，从语音技术控制台已授权音色列表补充。
+      {
+        id: 'zh_female_shuangkuaisisi_moon_bigtts',
+        name: '爽快思思（大模型）',
+        language: 'zh-CN',
+        gender: 'female',
+      },
+      {
+        id: 'zh_male_beijingxiaoye_emo_v2_mars_bigtts',
+        name: '北京小夜（大模型）',
+        language: 'zh-CN',
+        gender: 'male',
+      },
     ],
     supportedFormats: ['mp3'],
     speedRange: { min: 0.5, max: 2.0, default: 1.0 },
@@ -1339,7 +1354,10 @@ export const DEFAULT_TTS_VOICES: Record<BuiltInTTSProviderId, string> = {
   'glm-tts': 'tongtong',
   'qwen-tts': 'Cherry',
   'voxcpm-tts': VOXCPM_AUTO_VOICE_ID,
-  'doubao-tts': 'zh_female_vv_uranus_bigtts',
+  // Default to a 大模型语音合成 (service_type.10029) voice — the uranus/Seed-TTS
+  // 2.0 voices 403 with 55000000 when the operator's grant only covers the
+  // bigtts product. See the voices list in TTS_PROVIDERS above.
+  'doubao-tts': 'zh_female_shuangkuaisisi_moon_bigtts',
   'elevenlabs-tts': 'EXAVITQu4vr4xnSDxMaL',
   'minimax-tts': 'female-yujie',
   'lemonade-tts': 'af_heart',

@@ -68,6 +68,14 @@ export async function GET(req: NextRequest, { params }: Params) {
           isPublic: access.isPublic,
           publishedAt: access.publishedAt,
           generationComplete: access.generationComplete,
+          // Generation liveness + last failure reason. A pending page whose
+          // heartbeat is stale is interrupted/failed, not "generating" — the
+          // classroom branches on exactly that distinction.
+          generationHeartbeatAt: access.generationHeartbeatAt,
+          generationError: access.generationError,
+          // The course's explicit AI cover (course_user_meta), when one was
+          // generated. Course content, not identity — the ownerId stays out.
+          coverUrl: access.coverUrl,
           // Which layer answered. Diagnostic only — the client must not branch
           // on it.
           source: access.source,

@@ -12,6 +12,8 @@ import { ServerProvidersInit } from '@/components/server-providers-init';
 import { StorageHealthNotice } from '@/components/storage-health-notice';
 import { AccessCodeGuard } from '@/components/access-code-guard';
 import { ProSwapWatcher } from '@/components/workbench/ProSwapWatcher';
+import { AccountProfileSync } from '@/components/account-profile-sync';
+import { LoginModal } from '@/components/login-modal';
 
 // The UI font is loaded from @fontsource's stylesheet rather than next/font,
 // because only the stylesheet carries the per-subset `unicode-range`
@@ -29,9 +31,9 @@ import { ProSwapWatcher } from '@/components/workbench/ProSwapWatcher';
 import '@fontsource-variable/inter';
 
 export const metadata: Metadata = {
-  title: 'OpenMAIC',
+  title: 'AI Classroom',
   description:
-    'The open-source AI interactive classroom. Upload a PDF to instantly generate an immersive, multi-agent learning experience.',
+    'AI Classroom — upload a document or describe a topic to instantly generate an immersive, interactive course.',
 };
 
 export default function RootLayout({
@@ -50,6 +52,13 @@ export default function RootLayout({
             <ServerProvidersInit />
             <ProSwapWatcher />
             <AccessCodeGuard>{children}</AccessCodeGuard>
+            {/* Reconciles the learner profile (avatar/nickname/bio) with the
+                logged-in account on load and on every auth change. Renders
+                nothing; must sit inside I18nProvider but outside any page. */}
+            <AccountProfileSync />
+            {/* The global login modal; opened in place by every surface that
+                used to navigate to /login (see lib/store/auth-modal.ts). */}
+            <LoginModal />
             <Toaster position="top-center" />
             {/* After the Toaster: this one raises a toast on mount when
                 persistence is already broken, and a toast raised before its

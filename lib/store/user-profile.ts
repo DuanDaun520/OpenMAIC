@@ -18,15 +18,15 @@ import { createKVPersistStorage, purgeLegacyPersistKey } from '@/lib/store/kv-pe
  */
 const recovery: { rehydrate?: () => void | Promise<void> } = {};
 
-/** Predefined avatar options */
+/** Predefined avatar options — flat-vector learner portraits in the same
+ * style as the AI roster (see public/avatars). */
 export const AVATAR_OPTIONS = [
-  '/avatars/user.png',
-  '/avatars/teacher-2.png',
-  '/avatars/assist-2.png',
-  '/avatars/clown-2.png',
-  '/avatars/curious-2.png',
-  '/avatars/note-taker-2.png',
-  '/avatars/thinker-2.png',
+  '/avatars/user-3.png',
+  '/avatars/user-3-b.png',
+  '/avatars/user-3-c.png',
+  '/avatars/user-3-d.png',
+  '/avatars/teacher-3.png',
+  '/avatars/teacher-3-f.png',
 ] as const;
 
 export interface UserProfileState {
@@ -34,31 +34,107 @@ export interface UserProfileState {
   avatar: string;
   nickname: string;
   bio: string;
+  /**
+   * True once a live account session was observed: the server-side account
+   * (`user_accounts`) is then the source of truth — edits are pushed up via
+   * PATCH /api/auth/profile and `hydrateFromServer` wins over KV-restored
+   * values. Anonymous / pure-browser mode keeps the KV behaviour unchanged.
+   * Deliberately NOT persisted: it is re-established on every load by
+   * `components/account-profile-sync.tsx`.
+   */
+  accountBound: boolean;
   setAvatar: (avatar: string) => void;
   setNickname: (nickname: string) => void;
   setBio: (bio: string) => void;
+  bindToAccount: () => void;
+  markAnonymous: () => void;
+  /** Adopt the server's values wholesale (server-wins hydration). */
+  hydrateFromServer: (profile: ServerProfile) => void;
+}
+
+/** The account-side shape returned by /api/auth/me and PATCH /api/auth/profile. */
+export interface ServerProfile {
+  avatarUrl: string | null;
+  nickname: string | null;
+  bio: string | null;
+}
+
+/** Fire-and-forget push of profile fields to the account. Failures are
+ * swallowed: the next hydration reconciles, and a hard failure would turn a
+ * cosmetic profile edit into a blocking error. */
+export function pushServerProfilePatch(
+  patch: Partial<{ avatarUrl: string; nickname: string; bio: string }>,
+): void {
+  void fetch('/api/auth/profile', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'x-user-request': '1' },
+    body: JSON.stringify(patch),
+  }).catch(() => undefined);
 }
 
 export const useUserProfileStore = create<UserProfileState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       avatar: AVATAR_OPTIONS[0],
       nickname: '',
       bio: '',
-      setAvatar: (avatar) => set({ avatar }),
-      setNickname: (nickname) => set({ nickname }),
-      setBio: (bio) => set({ bio }),
+      accountBound: false,
+      setAvatar: (avatar) => {
+        set({ avatar });
+        if (get().accountBound) pushServerProfilePatch({ avatarUrl: avatar });
+      },
+      setNickname: (nickname) => {
+        set({ nickname });
+        if (get().accountBound) pushServerProfilePatch({ nickname });
+      },
+      setBio: (bio) => {
+        set({ bio });
+        if (get().accountBound) pushServerProfilePatch({ bio });
+      },
+      bindToAccount: () => set({ accountBound: true }),
+      markAnonymous: () => set({ accountBound: false }),
+      hydrateFromServer: (profile) =>
+        set({
+          avatar: profile.avatarUrl || AVATAR_OPTIONS[0],
+          nickname: profile.nickname ?? '',
+          bio: profile.bio ?? '',
+          accountBound: true,
+        }),
     }),
     {
       name: 'user-profile-storage',
-      storage: createKVPersistStorage<UserProfileState>('account', {
-        // One recovery attempt when a write is refused because hydration never
-        // succeeded — the backend may have come back since. Routed through a
-        // variable assigned below rather than naming the store directly: a
-        // self-reference here would make the store's own type circular and
-        // silently widen every selector to `any`.
-        onWriteRefused: () => recovery.rehydrate?.(),
+      version: 1,
+      // `accountBound` is session state, not user data: it is re-derived from
+      // /api/auth/me on every load by the account-profile-sync component, and
+      // persisting it would resurrect a stale "logged in" across a logout.
+      partialize: (state) => ({
+        avatar: state.avatar,
+        nickname: state.nickname,
+        bio: state.bio,
       }),
+      // v1: the default learner portrait moved to the flat-vector roster
+      // style. Remap only the old DEFAULT — an explicitly picked avatar keeps
+      // its file (the old files still ship).
+      migrate: (persistedState: unknown) => {
+        const state = persistedState as UserProfileState | undefined;
+        if (!state || state.avatar !== '/avatars/user.png') {
+          return (persistedState ?? {}) as UserProfileState;
+        }
+        return { ...state, avatar: AVATAR_OPTIONS[0] };
+      },
+      // Typed to the partialized shape: zustand pairs `storage` with what
+      // `partialize` emits, not with the full store state.
+      storage: createKVPersistStorage<{ avatar: string; nickname: string; bio: string }>(
+        'account',
+        {
+          // One recovery attempt when a write is refused because hydration never
+          // succeeded — the backend may have come back since. Routed through a
+          // variable assigned below rather than naming the store directly: a
+          // self-reference here would make the store's own type circular and
+          // silently widen every selector to `any`.
+          onWriteRefused: () => recovery.rehydrate?.(),
+        },
+      ),
     },
   ),
 );

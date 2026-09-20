@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { useStageStore } from '@/lib/store/stage';
 import { isSceneEditLocked } from '@/lib/edit/regen-lock';
 import { getCurrentModelConfig } from '@/lib/utils/model-config';
@@ -27,6 +27,11 @@ import {
 } from '@/lib/audio/voice-resolver';
 import { resolveTTSModelForVoice } from '@/lib/audio/constants';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
+import {
+  useGenerationLogStore,
+  type GenerationLogLevel,
+  type GenerationLogPhase,
+} from '@/lib/store/generation-log';
 import { generateMediaForOutlines } from '@/lib/media/media-orchestrator';
 import { putAsset } from '@/lib/media/asset-pool';
 import { mayGenerateForStage } from '@/lib/classroom/generation-permission';
@@ -133,6 +138,104 @@ function messageFromError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+/**
+ * Network-level fetch failures surface from the browser as a bare TypeError
+ * ("Failed to fetch"; Safari says "Load failed") — no status, no body, and no
+ * server-side trace, because the request never completed. Wrap them with what
+ * that actually means so the generation log (and stage_meta.generation_error)
+ * records something diagnosable instead of the raw browser wording.
+ */
+const NETWORK_FETCH_FAILURE_RE =
+  /failed to fetch|load failed|fetch failed|network error|networkerror/i;
+
+function describeGenerationError(error: unknown, fallback: string): string {
+  const message = messageFromError(error, fallback);
+  if (!NETWORK_FETCH_FAILURE_RE.test(message)) return message;
+  return (
+    `${message}（网络层失败：请求未收到服务器响应，无 HTTP 状态码。` +
+    '常见原因：网络中断、反向代理/网关超时、开发服务器重启或正在编译）'
+  );
+}
+
+/**
+ * Shared retry telemetry for the generation fetches — one warn per retry,
+ * carrying which scene/provider it is for, the failing reason and the
+ * backoff. Without this the retries happen silently and the log only ever
+ * shows the final, least informative failure.
+ */
+function logRetry(prefix: string) {
+  return (event: { attempt: number; maxAttempts: number; nextDelayMs: number; reason: string }) => {
+    log.warn(
+      `${prefix}: attempt ${event.attempt}/${event.maxAttempts} failed (${event.reason}), retrying in ${event.nextDelayMs}ms`,
+    );
+  };
+}
+
+/**
+ * How often a running generation loop re-asserts its liveness. Finer than the
+ * staleness windows any consumer applies (the classroom's interrupted seed,
+ * the course-list badge), so one dropped pulse never reads as dead.
+ */
+const GENERATION_HEARTBEAT_INTERVAL_MS = 30_000;
+
+/**
+ * Report this tab's generation run to the server-side liveness signal.
+ *
+ * Fire-and-forget by design: a pulse is advisory state, and a lost one is
+ * indistinguishable from a slow scene — the next interval tick re-asserts it.
+ * Only the `error` pulse is load-bearing (it persists the reason a page is
+ * stuck), and losing THAT still leaves the interrupted seed to say "已中断".
+ */
+function sendGenerationPulse(
+  stageId: string,
+  kind: 'start' | 'heartbeat' | 'error',
+  message?: string,
+): void {
+  void fetch(`/api/stages/${encodeURIComponent(stageId)}/generation-pulse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(message === undefined ? { kind } : { kind, message }),
+  }).catch(() => undefined);
+}
+
+/**
+ * Tell the server the deck is finished: sets the sidecar completion flag and
+ * clears the heartbeat/error signal (nothing is generating, nothing failed).
+ * Also fire-and-forget — the outline document's own `generationComplete` flag
+ * (persisted by the store save) remains the durable completion record.
+ */
+function sendGenerationComplete(stageId: string): void {
+  void fetch(`/api/stages/${encodeURIComponent(stageId)}/generation-complete`, {
+    method: 'POST',
+  }).catch(() => undefined);
+}
+
+/**
+ * Append one entry to the course's AI production log (课件AI制作日志) — the
+ * timeline the stage header's log dialog shows. Messages are localized here,
+ * at capture time, so an entry reads correctly even if the UI language later
+ * changes.
+ */
+function logGeneration(
+  stageId: string,
+  level: GenerationLogLevel,
+  phase: GenerationLogPhase,
+  message: string,
+  scene?: { order: number; title: string },
+): void {
+  useGenerationLogStore.getState().appendGenerationLog(stageId, {
+    level,
+    phase,
+    message,
+    ...(scene ? { sceneOrder: scene.order, sceneTitle: scene.title } : {}),
+  });
+}
+
+/** Interpolation params naming one page, for the generationLog.m.* strings. */
+function pageParams(outline: SceneOutline): { order: number; title: string } {
+  return { order: outline.order, title: outline.title };
+}
+
 function errorMeta(error: unknown): Pick<SceneContentResult, 'errorCode' | 'statusCode'> {
   if (!error || typeof error !== 'object') return {};
   const record = error as { errorCode?: unknown; statusCode?: unknown };
@@ -183,15 +286,22 @@ export async function fetchSceneContent(
       {
         label: `scene content "${params.outline.title}"`,
         shouldRetryResult: (result) => !result.success || !result.content,
+        onRetry: logRetry(
+          `Scene content "${params.outline.title}" (page ${params.outline.order}, stage ${params.stageId})`,
+        ),
         ...retryOptions,
         signal,
       },
     );
   } catch (error) {
     if (isAbortError(error)) throw error;
+    log.warn(
+      `Scene content failed: "${params.outline.title}" (page ${params.outline.order}, stage ${params.stageId})`,
+      error,
+    );
     return {
       success: false,
-      error: messageFromError(error, 'Content generation failed'),
+      error: describeGenerationError(error, 'Content generation failed'),
       ...errorMeta(error),
     };
   }
@@ -232,15 +342,22 @@ export async function fetchSceneActions(
       {
         label: `scene actions "${params.outline.title}"`,
         shouldRetryResult: (result) => !result.success || !result.scene,
+        onRetry: logRetry(
+          `Scene actions "${params.outline.title}" (page ${params.outline.order}, stage ${params.stageId})`,
+        ),
         ...retryOptions,
         signal,
       },
     );
   } catch (error) {
     if (isAbortError(error)) throw error;
+    log.warn(
+      `Scene actions failed: "${params.outline.title}" (page ${params.outline.order}, stage ${params.stageId})`,
+      error,
+    );
     return {
       success: false,
-      error: messageFromError(error, 'Actions generation failed'),
+      error: describeGenerationError(error, 'Actions generation failed'),
       ...errorMeta(error),
     };
   }
@@ -389,6 +506,7 @@ export async function generateAndStoreTTS(
       {
         label: `tts "${requestId}"`,
         shouldRetryResult: (result) => !result.success || !result.base64 || !result.format,
+        onRetry: logRetry(`TTS ${requestId} (provider ${ttsProviderId}, voice ${ttsVoice})`),
         ...retryOptions,
         signal,
       },
@@ -686,6 +804,85 @@ export interface UseSceneGeneratorOptions {
   onComplete?: () => void;
 }
 
+/**
+ * The tab's single live generation run.
+ *
+ * Course generation used to live inside the classroom component's React
+ * lifecycle: unmounting the page called `stop()` and paused the deck, so a
+ * course only progressed while its classroom was open. The run state now sits
+ * at module scope so the loop outlives the surface that started it — leaving
+ * the classroom keeps generating, with scenes landing in the global stage
+ * store (persisted by its module-level scheduler) and the heartbeat keeping
+ * the course-list badge truthful.
+ *
+ * One run per tab is a structural constraint, not a policy choice: the stage
+ * store holds a single course at a time, so a `generateRemaining` call for a
+ * different course supersedes the live run (aborting it) instead of running
+ * beside it, and a run whose course was swapped out of the store stops itself
+ * at the store's generation epoch — the same boundary that already fenced
+ * cross-course scene writes.
+ */
+const RUN: {
+  stageId: string | null;
+  aborting: boolean;
+  generating: boolean;
+  mediaAbort: AbortController | null;
+  fetchAbort: AbortController | null;
+  lastParams: GenerationParams | null;
+} = {
+  stageId: null,
+  aborting: false,
+  generating: false,
+  mediaAbort: null,
+  fetchAbort: null,
+  lastParams: null,
+};
+
+/** Token of the run that currently owns generation-status presentation. */
+let activeGenerationRunToken = 0;
+
+/** Latest `generateRemaining`, kept for the retry path's resume hand-off. */
+let resumeGenerateRemaining: ((params: GenerationParams) => Promise<void>) | null = null;
+
+/**
+ * Decide what a `generateRemaining` call means against the live run: the same
+ * course is already generating in the background (join it — no second loop),
+ * another course's run still holds the shared store (supersede it), or no run
+ * is live (start one).
+ */
+export function admitGenerationRun(
+  run: { generating: boolean; stageId: string | null },
+  requestedStageId: string,
+): 'continue' | 'supersede' | 'start' {
+  if (!run.generating) return 'start';
+  return run.stageId === requestedStageId ? 'continue' : 'supersede';
+}
+
+/**
+ * Whether a run may still write generation status into the shared stage
+ * store. Two ownership facts must hold: the run is still the newest one (a
+ * superseded run must not paint `paused` over its successor's `generating`),
+ * and the store still holds this run's epoch (a course that took over the
+ * store owns its own presentation). Logging, pulses, and sidecar signals stay
+ * permitted regardless — they are scoped to the run's own course.
+ */
+export function mayPresentGenerationStatus(input: {
+  runToken: number;
+  activeRunToken: number;
+  startEpoch: number;
+  currentEpoch: number;
+}): boolean {
+  return input.runToken === input.activeRunToken && input.startEpoch === input.currentEpoch;
+}
+
+/** Abort the live run's fetches/media and invalidate its store epoch. */
+function stopActiveGeneration(): void {
+  RUN.aborting = true;
+  useStageStore.getState().bumpGenerationEpoch();
+  RUN.fetchAbort?.abort();
+  RUN.mediaAbort?.abort();
+}
+
 export interface GenerationParams {
   pdfImages?: PdfImage[];
   imageMapping?: ImageMapping;
@@ -701,21 +898,23 @@ export interface GenerationParams {
 }
 
 export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
-  const abortRef = useRef(false);
-  const generatingRef = useRef(false);
-  const mediaAbortRef = useRef<AbortController | null>(null);
-  const fetchAbortRef = useRef<AbortController | null>(null);
-  const lastParamsRef = useRef<GenerationParams | null>(null);
-  const generateRemainingRef = useRef<((params: GenerationParams) => Promise<void>) | null>(null);
-
   const store = useStageStore;
 
   const generateRemaining = useCallback(
     async (params: GenerationParams) => {
-      lastParamsRef.current = params;
-      if (generatingRef.current) return;
-      generatingRef.current = true;
-      abortRef.current = false;
+      // Admission against the tab-wide run: joining an in-flight run of the
+      // SAME course is a no-op (the background loop already carries it);
+      // a DIFFERENT course's live run must be superseded first because both
+      // would write into the one shared stage store.
+      const requestedStageId = store.getState().stage?.id;
+      if (!requestedStageId) return;
+      const admission = admitGenerationRun(RUN, requestedStageId);
+      if (admission === 'continue') return;
+      if (admission === 'supersede') stopActiveGeneration();
+      RUN.lastParams = params;
+      RUN.generating = true;
+      RUN.aborting = false;
+      RUN.stageId = requestedStageId;
       const removeGeneratingOutline = (outlineId: string) => {
         const current = store.getState().generatingOutlines;
         if (!current.some((o) => o.id === outlineId)) return;
@@ -723,16 +922,30 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
       };
 
       // Create a new AbortController for this generation run
-      fetchAbortRef.current = new AbortController();
-      const signal = fetchAbortRef.current.signal;
+      RUN.fetchAbort = new AbortController();
+      const signal = RUN.fetchAbort.signal;
 
       const state = store.getState();
       const { outlines, scenes, stage } = state;
       const startEpoch = state.generationEpoch;
       if (!stage || outlines.length === 0) {
-        generatingRef.current = false;
+        RUN.generating = false;
         return;
       }
+
+      // Presentation ownership for this run: only the newest run may write
+      // generation status, and only while the store still holds this run's
+      // epoch. A superseded or taken-over run keeps its stage-scoped work
+      // (logging, pulses, the completion sidecar) but never paints `paused`
+      // or `completed` over the course that now owns the store.
+      const runToken = ++activeGenerationRunToken;
+      const mayPresent = () =>
+        mayPresentGenerationStatus({
+          runToken,
+          activeRunToken: activeGenerationRunToken,
+          startEpoch,
+          currentEpoch: store.getState().generationEpoch,
+        });
 
       store.getState().setGenerationStatus('generating');
 
@@ -747,11 +960,44 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
         store.getState().setGeneratingOutlines([]);
         store.getState().setGenerationComplete(true);
         options.onComplete?.();
-        generatingRef.current = false;
+        RUN.generating = false;
         return;
       }
 
       store.getState().setGeneratingOutlines(pending);
+      // A fresh run retries every pending outline, including ones a previous
+      // run failed or that were seeded as interrupted on load — their failure
+      // presentation must not outlive the retry that invalidates it.
+      store.getState().clearFailedOutlines();
+      store.getState().clearGenerationFailure();
+      logGeneration(
+        stage.id,
+        'info',
+        'start',
+        getClientTranslation('generationLog.m.start', { count: pending.length }),
+      );
+      // Liveness: assert this run immediately, then on the interval below for
+      // as long as it lasts. 'start' also clears the previously recorded
+      // failure reason server-side (a retry invalidates it).
+      sendGenerationPulse(stage.id, 'start');
+      const heartbeatTimer = setInterval(() => {
+        sendGenerationPulse(stage.id, 'heartbeat');
+      }, GENERATION_HEARTBEAT_INTERVAL_MS);
+
+      // Background survival ends where the shared store does. Loading another
+      // classroom (or clearing the store) swaps the single course the store
+      // holds, so this run must stop its fetches and its media pass at that
+      // boundary — the line the classroom's unmount used to draw with stop(),
+      // now drawn by the store itself so leaving the page alone no longer
+      // pauses generation. The swapped-in stage already bumped the epoch, so
+      // the loop below pauses at its next checkpoint on its own.
+      let takenOver = false;
+      const unsubscribeTakeover = store.subscribe((next) => {
+        if (takenOver || next.stage?.id === stage.id) return;
+        takenOver = true;
+        RUN.fetchAbort?.abort();
+        RUN.mediaAbort?.abort();
+      });
 
       // Launch media generation in parallel — does not block content/action generation.
       // Under server-backed persistence, abort whatever the ref held first:
@@ -762,10 +1008,18 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
       // waits for the aborted pass to settle before collecting, so the two
       // never overlap. Browser-only mode keeps its original behaviour, where an
       // overlapping pass costs a duplicate download and nothing else.
-      if (isServerBackedMediaPersistence()) mediaAbortRef.current?.abort();
-      mediaAbortRef.current = new AbortController();
-      generateMediaForOutlines(outlines, stage.id, mediaAbortRef.current.signal).catch((err) => {
+      if (isServerBackedMediaPersistence()) RUN.mediaAbort?.abort();
+      RUN.mediaAbort = new AbortController();
+      generateMediaForOutlines(outlines, stage.id, RUN.mediaAbort.signal).catch((err) => {
         log.warn('Media generation error:', err);
+        logGeneration(
+          stage.id,
+          'warning',
+          'media',
+          getClientTranslation('generationLog.m.mediaFailed', {
+            error: messageFromError(err, 'media generation failed'),
+          }),
+        );
       });
 
       // Get previousSpeeches from last completed scene
@@ -837,7 +1091,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
                 },
                 {
                   shouldContinue: () =>
-                    !abortRef.current && store.getState().generationEpoch === startEpoch,
+                    !RUN.aborting && store.getState().generationEpoch === startEpoch,
                 },
               ).map((promise, i) => [pending[i].id, promise] as const),
             )
@@ -846,13 +1100,20 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
         let pausedByFailureOrAbort = false;
         let hadContentFailure = false;
         for (const outline of pending) {
-          if (abortRef.current || store.getState().generationEpoch !== startEpoch) {
-            store.getState().setGenerationStatus('paused');
+          if (RUN.aborting || store.getState().generationEpoch !== startEpoch) {
+            if (mayPresent()) store.getState().setGenerationStatus('paused');
             pausedByFailureOrAbort = true;
             break;
           }
 
           store.getState().setCurrentGeneratingOrder(outline.order);
+          logGeneration(
+            stage.id,
+            'info',
+            'content',
+            getClientTranslation('generationLog.m.contentStart', pageParams(outline)),
+            pageParams(outline),
+          );
 
           // Step 1: content — await this outline's pre-warmed fetch (parallel),
           // which usually resolved while the previous scene's actions/TTS ran; or
@@ -869,12 +1130,24 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
           }
 
           if (!contentResult.success || !contentResult.content) {
-            if (abortRef.current || store.getState().generationEpoch !== startEpoch) {
+            if (RUN.aborting || store.getState().generationEpoch !== startEpoch) {
               pausedByFailureOrAbort = true;
               break;
             }
-            store.getState().addFailedOutline(outline);
-            options.onSceneFailed?.(outline, contentResult.error || 'Content generation failed');
+            const contentError = contentResult.error || 'Content generation failed';
+            store.getState().addFailedOutline(outline, contentError);
+            logGeneration(
+              stage.id,
+              'error',
+              'content',
+              getClientTranslation('generationLog.m.contentFailed', {
+                ...pageParams(outline),
+                error: contentError,
+              }),
+              pageParams(outline),
+            );
+            sendGenerationPulse(stage.id, 'error', contentError);
+            options.onSceneFailed?.(outline, contentError);
             if (contentPromises) {
               // Parallel: surface the failure but keep going with the other scenes
               // (their content is already in flight).
@@ -888,14 +1161,21 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
             break;
           }
 
-          if (abortRef.current || store.getState().generationEpoch !== startEpoch) {
-            store.getState().setGenerationStatus('paused');
+          if (RUN.aborting || store.getState().generationEpoch !== startEpoch) {
+            if (mayPresent()) store.getState().setGenerationStatus('paused');
             pausedByFailureOrAbort = true;
             break;
           }
 
           // Step 2: Generate actions + assemble scene
           options.onPhaseChange?.('actions', outline);
+          logGeneration(
+            stage.id,
+            'info',
+            'actions',
+            getClientTranslation('generationLog.m.actionsStart', pageParams(outline)),
+            pageParams(outline),
+          );
           const actionsResult = await fetchSceneActions(
             {
               outline: contentResult.effectiveOutline || outline,
@@ -929,12 +1209,24 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
                 signal,
               );
               if (!ttsResult.success) {
-                if (abortRef.current || store.getState().generationEpoch !== startEpoch) {
+                if (RUN.aborting || store.getState().generationEpoch !== startEpoch) {
                   pausedByFailureOrAbort = true;
                   break;
                 }
-                store.getState().addFailedOutline(outline);
-                options.onSceneFailed?.(outline, ttsResult.error || 'TTS generation failed');
+                const ttsError = ttsResult.error || 'TTS generation failed';
+                store.getState().addFailedOutline(outline, ttsError);
+                logGeneration(
+                  stage.id,
+                  'error',
+                  'actions',
+                  getClientTranslation('generationLog.m.ttsFailed', {
+                    ...pageParams(outline),
+                    error: ttsError,
+                  }),
+                  pageParams(outline),
+                );
+                sendGenerationPulse(stage.id, 'error', ttsError);
+                options.onSceneFailed?.(outline, ttsError);
                 store.getState().setGenerationStatus('paused');
                 pausedByFailureOrAbort = true;
                 break;
@@ -950,30 +1242,62 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
 
             removeGeneratingOutline(outline.id);
             useStageStore.getState().addScene(scene);
+            logGeneration(
+              stage.id,
+              'success',
+              'scene-done',
+              getClientTranslation('generationLog.m.sceneDone', pageParams(outline)),
+              pageParams(outline),
+            );
             options.onSceneGenerated?.(scene, outline.order);
             previousSpeeches = actionsResult.previousSpeeches || [];
           } else {
-            if (abortRef.current || store.getState().generationEpoch !== startEpoch) {
+            if (RUN.aborting || store.getState().generationEpoch !== startEpoch) {
               pausedByFailureOrAbort = true;
               break;
             }
-            store.getState().addFailedOutline(outline);
-            options.onSceneFailed?.(outline, actionsResult.error || 'Actions generation failed');
-            store.getState().setGenerationStatus('paused');
+            const actionsError = actionsResult.error || 'Actions generation failed';
+            store.getState().addFailedOutline(outline, actionsError);
+            logGeneration(
+              stage.id,
+              'error',
+              'actions',
+              getClientTranslation('generationLog.m.actionsFailed', {
+                ...pageParams(outline),
+                error: actionsError,
+              }),
+              pageParams(outline),
+            );
+            sendGenerationPulse(stage.id, 'error', actionsError);
+            options.onSceneFailed?.(outline, actionsError);
+            if (mayPresent()) store.getState().setGenerationStatus('paused');
             pausedByFailureOrAbort = true;
             break;
           }
         }
 
-        if (!abortRef.current && !pausedByFailureOrAbort) {
+        if (!RUN.aborting && !pausedByFailureOrAbort) {
           if (hadContentFailure) {
             // Parallel content phase left some outlines failed but kept going;
             // surface them for retry instead of signalling a clean completion.
-            store.getState().setGenerationStatus('paused');
+            if (mayPresent()) store.getState().setGenerationStatus('paused');
           } else {
-            store.getState().setGenerationStatus('completed');
-            store.getState().setGeneratingOutlines([]);
-            store.getState().setGenerationComplete(true);
+            // Store presentation only while this run still owns the store —
+            // the stage-scoped completion facts below it hold regardless.
+            if (mayPresent()) {
+              store.getState().setGenerationStatus('completed');
+              store.getState().setGeneratingOutlines([]);
+              store.getState().setGenerationComplete(true);
+              store.getState().clearGenerationFailure();
+            }
+            logGeneration(
+              stage.id,
+              'success',
+              'completed',
+              getClientTranslation('generationLog.m.completed', { count: outlines.length }),
+            );
+            // Sidecar mirror: completed + no heartbeat/error left behind.
+            sendGenerationComplete(stage.id);
             options.onComplete?.();
           }
         }
@@ -981,36 +1305,48 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
         // AbortError is expected when stop() is called — don't treat as failure
         if (isAbortError(err)) {
           log.info('Generation aborted');
-          store.getState().setGenerationStatus('paused');
+          if (mayPresent()) store.getState().setGenerationStatus('paused');
+          logGeneration(
+            stage.id,
+            'warning',
+            'paused',
+            getClientTranslation('generationLog.m.paused'),
+          );
         } else {
           throw err;
         }
       } finally {
-        generatingRef.current = false;
-        fetchAbortRef.current = null;
+        clearInterval(heartbeatTimer);
+        unsubscribeTakeover();
+        // Only the current run may release the tab-wide state: a superseded
+        // run winding down here must not clear its successor's generating
+        // flag or AbortControllers.
+        if (activeGenerationRunToken === runToken) {
+          RUN.generating = false;
+          RUN.fetchAbort = null;
+        }
       }
     },
     [options, store],
   );
 
-  // Keep ref in sync so retrySingleOutline can call it
-  generateRemainingRef.current = generateRemaining;
+  // Keep the module-level hand-off in sync so retrySingleOutline can resume
+  // the remaining outlines through the tab-wide run state.
+  resumeGenerateRemaining = generateRemaining;
 
+  /** Explicitly stop the tab's live generation run (pause the deck). */
   const stop = useCallback(() => {
-    abortRef.current = true;
-    store.getState().bumpGenerationEpoch();
-    fetchAbortRef.current?.abort();
-    mediaAbortRef.current?.abort();
-  }, [store]);
+    stopActiveGeneration();
+  }, []);
 
-  const isGenerating = useCallback(() => generatingRef.current, []);
+  const isGenerating = useCallback(() => RUN.generating, []);
 
   /** Retry a single failed outline from scratch (content → actions → TTS). */
   const retrySingleOutline = useCallback(
     async (outlineId: string) => {
       const state = store.getState();
       const outline = state.failedOutlines.find((o) => o.id === outlineId);
-      const params = lastParamsRef.current;
+      const params = RUN.lastParams;
       if (!outline || !state.stage || !params) return;
       // A whole-outline retry runs content, actions and narration on the
       // operator's keys. The surfaces already withhold the affordance when
@@ -1035,6 +1371,11 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
         return;
       }
 
+      // Captured before the callbacks below: TS narrowing of `state.stage`
+      // does not survive into function expressions, and the run below reads
+      // it from several closures.
+      const stageId = state.stage.id;
+
       const removeGeneratingOutline = () => {
         const current = store.getState().generatingOutlines;
         if (!current.some((o) => o.id === outlineId)) return;
@@ -1044,10 +1385,25 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
       // Remove from failed list and mark as generating
       store.getState().retryFailedOutline(outlineId);
       store.getState().setGenerationStatus('generating');
+      store.getState().clearGenerationFailure();
       const currentGenerating = store.getState().generatingOutlines;
       if (!currentGenerating.some((o) => o.id === outline.id)) {
         store.getState().setGeneratingOutlines([...currentGenerating, outline]);
       }
+      // Same liveness contract as a full run: assert immediately, re-assert on
+      // the interval, and let a stale heartbeat tell the next load this run
+      // died if the tab goes away mid-retry.
+      sendGenerationPulse(stageId, 'start');
+      const heartbeatTimer = setInterval(() => {
+        sendGenerationPulse(stageId, 'heartbeat');
+      }, GENERATION_HEARTBEAT_INTERVAL_MS);
+      logGeneration(
+        stageId,
+        'info',
+        'retry',
+        getClientTranslation('generationLog.m.retry', pageParams(outline)),
+        pageParams(outline),
+      );
 
       const abortController = new AbortController();
       const signal = abortController.signal;
@@ -1069,7 +1425,19 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
         );
 
         if (!contentResult.success || !contentResult.content) {
-          store.getState().addFailedOutline(outline);
+          const contentError = contentResult.error || 'Content generation failed';
+          store.getState().addFailedOutline(outline, contentError);
+          logGeneration(
+            stageId,
+            'error',
+            'content',
+            getClientTranslation('generationLog.m.contentFailed', {
+              ...pageParams(outline),
+              error: contentError,
+            }),
+            pageParams(outline),
+          );
+          sendGenerationPulse(stageId, 'error', contentError);
           return;
         }
 
@@ -1097,7 +1465,19 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
         );
 
         if (!actionsResult.success || !actionsResult.scene) {
-          store.getState().addFailedOutline(outline);
+          const actionsError = actionsResult.error || 'Actions generation failed';
+          store.getState().addFailedOutline(outline, actionsError);
+          logGeneration(
+            stageId,
+            'error',
+            'actions',
+            getClientTranslation('generationLog.m.actionsFailed', {
+              ...pageParams(outline),
+              error: actionsError,
+            }),
+            pageParams(outline),
+          );
+          sendGenerationPulse(stageId, 'error', actionsError);
           return;
         }
 
@@ -1117,7 +1497,19 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
             signal,
           );
           if (!ttsResult.success) {
-            store.getState().addFailedOutline(outline);
+            const ttsError = ttsResult.error || 'TTS generation failed';
+            store.getState().addFailedOutline(outline, ttsError);
+            logGeneration(
+              stageId,
+              'error',
+              'actions',
+              getClientTranslation('generationLog.m.ttsFailed', {
+                ...pageParams(outline),
+                error: ttsError,
+              }),
+              pageParams(outline),
+            );
+            sendGenerationPulse(stageId, 'error', ttsError);
             return;
           }
         }
@@ -1129,21 +1521,56 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
 
         removeGeneratingOutline();
         useStageStore.getState().addScene(actionsResult.scene);
+        logGeneration(
+          stageId,
+          'success',
+          'scene-done',
+          getClientTranslation('generationLog.m.sceneDone', pageParams(outline)),
+          pageParams(outline),
+        );
 
         // Resume remaining generation if there are pending outlines
-        if (store.getState().generatingOutlines.length > 0 && lastParamsRef.current) {
-          generateRemainingRef.current?.(lastParamsRef.current);
-        } else {
+        if (store.getState().generatingOutlines.length > 0 && RUN.lastParams) {
+          resumeGenerateRemaining?.(RUN.lastParams);
+        } else if (store.getState().generationEpoch === retryEpoch) {
           // This retry may have materialized the final outstanding slide. The
           // generateRemaining completion path is not reached on the retry flow,
           // so mark completion here too — otherwise a later delete would treat
-          // the orphaned outline as pending and regenerate it.
+          // the orphaned outline as pending and regenerate it. The epoch fence
+          // keeps a winding-down retry from marking a course that has since
+          // taken over the store as complete.
           store.getState().markGenerationCompleteIfDone();
+          if (useStageStore.getState().generationComplete) {
+            store.getState().clearGenerationFailure();
+            logGeneration(
+              stageId,
+              'success',
+              'completed',
+              getClientTranslation('generationLog.m.completed', {
+                count: store.getState().outlines.length,
+              }),
+            );
+            sendGenerationComplete(stageId);
+          }
         }
       } catch (err) {
         if (!isAbortError(err)) {
-          store.getState().addFailedOutline(outline);
+          const retryError = messageFromError(err, 'Generation failed');
+          store.getState().addFailedOutline(outline, retryError);
+          logGeneration(
+            stageId,
+            'error',
+            'content',
+            getClientTranslation('generationLog.m.failed', {
+              ...pageParams(outline),
+              error: retryError,
+            }),
+            pageParams(outline),
+          );
+          sendGenerationPulse(stageId, 'error', retryError);
         }
+      } finally {
+        clearInterval(heartbeatTimer);
       }
     },
     [store],

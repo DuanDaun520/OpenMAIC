@@ -10,6 +10,13 @@ import path from 'path';
 import yaml from 'js-yaml';
 import { createLogger } from '@/lib/logger';
 import {
+  ensureAdminProviderOverlayFresh,
+  getAdminProviderOverlaySync,
+  getAdminProviderOverlayVersion,
+} from '@/lib/admin/provider-overrides';
+import { decryptSecret } from '@/lib/admin/crypto';
+import { ensureVoiceOverridesFresh } from '@/lib/admin/voice-overrides';
+import {
   DEFAULT_QWEN_TTS_VOICE_CLONE_MODEL,
   isQwenCatalogVoice,
   isQwenVoiceCloneModel,
@@ -130,6 +137,7 @@ const VIDEO_ENV_MAP: Record<string, string> = {
 };
 
 const WEB_SEARCH_ENV_MAP: Record<string, string> = {
+  SERPBASE: 'serpbase',
   TAVILY: 'tavily',
   EXA: 'exa',
   BOCHA: 'bocha',
@@ -355,8 +363,10 @@ const OPENAI_IMAGE_PROVIDER_ID = 'openai-image';
 const ALIDOCMIND_PROVIDER_ID = 'alidocmind';
 const BEDROCK_PROVIDER_ID = 'bedrock';
 
-/** Cache keyed by YAML filename (empty string = default file). */
-const _configs: Map<string, ServerConfig> = new Map();
+/** Cache keyed by YAML filename (empty string = default file). Each entry
+ * records the overlay version it was built against, so a DB config change
+ * rebuilds it exactly once. */
+const _configs: Map<string, { config: ServerConfig; overlayVersion: number }> = new Map();
 
 /**
  * AliDocMind is server-configured when AK/SK are provided via env
@@ -551,14 +561,79 @@ function logConfig(config: ServerConfig, label: string): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Admin DB overlay (DB-first, env/YAML fallback)
+//
+// The admin console writes provider configuration to `provider_configs`. Rows
+// there take precedence over env/YAML for the same provider; absence of a row
+// leaves the env/YAML behavior untouched, so deployments that never open the
+// console resolve configs exactly as before. The overlay is served from an
+// in-memory snapshot (see `lib/admin/provider-overrides.ts`) because this
+// module's readers are synchronous.
+// ---------------------------------------------------------------------------
+
+/** `provider_configs.capability` → `ServerConfig` section key. */
+const CAPABILITY_SECTION_MAP = {
+  llm: 'providers',
+  tts: 'tts',
+  asr: 'asr',
+  pdf: 'pdf',
+  image: 'image',
+  video: 'video',
+  websearch: 'webSearch',
+} as const;
+
+function applyAdminProviderOverlay(config: ServerConfig): void {
+  const overlay = getAdminProviderOverlaySync();
+  if (!overlay) return;
+  for (const row of overlay.rows) {
+    const sectionKey = CAPABILITY_SECTION_MAP[row.capability];
+    if (!sectionKey) continue;
+    const section = config[sectionKey] as Record<string, ServerProviderEntry>;
+    const entry: ServerProviderEntry = {
+      apiKey: decryptSecret(row.apiKeyCipher),
+      baseUrl: row.baseUrl || undefined,
+      models: normalizeModelList(row.models),
+      proxy: row.proxy || undefined,
+    };
+
+    if (sectionKey === 'providers' || sectionKey === 'pdf') {
+      // LLM and PDF have no force-disable concept: `enabled: false` removes
+      // the entry entirely, making the provider unmanaged (clients fall back
+      // to their own credentials) — the closest thing to "off" this layer has.
+      if (!row.enabled) {
+        delete section[row.providerId];
+        continue;
+      }
+    } else if (!row.enabled) {
+      // Capability sections with the operator force-off switch (#665): keep
+      // the entry (still "configured") and add it to the disabled set — the
+      // same shape a YAML `enabled: false` produces.
+      config.disabled[sectionKey].add(row.providerId);
+    }
+
+    section[row.providerId] = entry;
+  }
+}
+
 function getConfig(): ServerConfig {
+  // Background refresh: keeps the DB overlay at most ~TTL stale for processes
+  // that did not perform the write themselves. No-op once fresh. The voice
+  // overlay rides the same cadence (its consumers are voice-list builders).
+  ensureAdminProviderOverlayFresh();
+  ensureVoiceOverridesFresh();
+
+  const overlayVersion = getAdminProviderOverlayVersion();
   const cached = _configs.get('');
-  if (cached) return cached;
+  // Rebuild when the overlay changes so DB writes (this process's or another
+  // one's, via the TTL refresh) invalidate the env/YAML cache precisely.
+  if (cached && cached.overlayVersion === overlayVersion) return cached.config;
 
   const yamlData = loadYamlFile(DEFAULT_FILENAME);
   const config = buildConfig(yamlData);
+  applyAdminProviderOverlay(config);
   logConfig(config, DEFAULT_FILENAME);
-  _configs.set('', config);
+  _configs.set('', { config, overlayVersion });
   return config;
 }
 
@@ -1009,6 +1084,9 @@ export function resolveServerWebSearchProviderId(preferredProviderId?: string): 
   ) {
     return preferredProviderId;
   }
+  // SerpBase leads the priority list: it is the product's preferred default
+  // search backend when its key is configured.
+  if (enabled('serpbase') && webSearch.serpbase?.apiKey) return 'serpbase';
   if (enabled('tavily') && webSearch.tavily?.apiKey) return 'tavily';
   if (enabled('exa') && webSearch.exa?.apiKey) return 'exa';
   if (enabled('bocha') && webSearch.bocha?.apiKey) return 'bocha';

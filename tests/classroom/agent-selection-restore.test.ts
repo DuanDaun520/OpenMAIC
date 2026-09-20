@@ -99,7 +99,7 @@ describe('restoreAgentSelection', () => {
     });
   });
 
-  it('falls back to the default preset trio when nothing else is valid', () => {
+  it('falls back to the full default lineup when nothing else is valid', () => {
     expect(
       restoreAgentSelection({
         persisted: { mode: 'preset', selectedAgentIds: [] },
@@ -108,7 +108,17 @@ describe('restoreAgentSelection', () => {
         isPresetAgent,
       }),
     ).toEqual({
-      selection: { mode: 'preset', selectedAgentIds: ['default-1', 'default-2', 'default-3'] },
+      selection: {
+        mode: 'preset',
+        selectedAgentIds: [
+          'default-1',
+          'default-2',
+          'default-3',
+          'default-4',
+          'default-5',
+          'default-6',
+        ],
+      },
       isUserSet: false,
     });
   });

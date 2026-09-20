@@ -37,6 +37,8 @@ export const maxDuration = 60;
 export async function POST(req: NextRequest) {
   let outlineTitle: string | undefined;
   let resolvedModelString: string | undefined;
+  let requestStageId: string | undefined;
+  const startedAt = Date.now();
   try {
     const body = await req.json();
     const {
@@ -136,18 +138,24 @@ export async function POST(req: NextRequest) {
       return result.text;
     };
 
+    requestStageId = stageId;
+
     // ── Build cross-scene context ──
     const allTitles = allOutlines.map((o) => o.title);
     const pageIndex = allOutlines.findIndex((o) => o.id === outline.id);
+    const page = (pageIndex >= 0 ? pageIndex : 0) + 1;
     const ctx: SceneGenerationContext = {
-      pageIndex: (pageIndex >= 0 ? pageIndex : 0) + 1,
+      pageIndex: page,
       totalPages: allOutlines.length,
       allTitles,
       previousSpeeches: incomingPreviousSpeeches ?? [],
     };
 
     // ── Generate actions ──
-    log.info(`Generating actions: "${outline.title}" (${outline.type}) [model=${modelString}]`);
+    log.info(
+      `Generating actions: "${outline.title}" (${outline.type}) ` +
+        `[stage=${stageId}, page=${page}/${allOutlines.length}, model=${modelString}]`,
+    );
 
     const generationContent = (
       'type' in content && content.type === 'pbl' ? normalizeLegacyPBLContent(content) : content
@@ -164,13 +172,17 @@ export async function POST(req: NextRequest) {
       languageDirective,
     });
 
-    log.info(`Generated ${actions.length} actions for: "${outline.title}"`);
+    log.info(
+      `Generated ${actions.length} actions for: "${outline.title}" [stage=${stageId}, elapsed=${Date.now() - startedAt}ms]`,
+    );
 
     // ── Build complete scene ──
     const scene = buildCompleteScene(outline, generationContent, actions, stageId);
 
     if (!scene) {
-      log.error(`Failed to build scene: "${outline.title}"`);
+      log.error(
+        `Failed to build scene: "${outline.title}" [stage=${stageId}, page=${page}, elapsed=${Date.now() - startedAt}ms]`,
+      );
 
       return apiError('GENERATION_FAILED', 500, `Failed to build scene: ${outline.title}`);
     }
@@ -181,13 +193,16 @@ export async function POST(req: NextRequest) {
       .map((a) => a.text);
 
     log.info(
-      `Scene assembled successfully: "${outline.title}" — ${scene.actions?.length ?? 0} actions`,
+      `Scene assembled successfully: "${outline.title}" — ${scene.actions?.length ?? 0} actions ` +
+        `[stage=${stageId}, page=${page}, elapsed=${Date.now() - startedAt}ms]`,
     );
 
     return apiSuccess({ scene, previousSpeeches: outputPreviousSpeeches });
   } catch (error) {
     log.error(
-      `Scene actions generation failed [scene="${outlineTitle ?? 'unknown'}", model=${resolvedModelString ?? 'unknown'}]:`,
+      `Scene actions generation failed [scene="${outlineTitle ?? 'unknown'}", ` +
+        `stage=${requestStageId ?? 'unknown'}, model=${resolvedModelString ?? 'unknown'}, ` +
+        `elapsed=${Date.now() - startedAt}ms]:`,
       error,
     );
     return llmApiError(error);

@@ -39,6 +39,8 @@ import {
   type RegisteredVoiceInfo,
   type VoiceCatalogProvider,
 } from '@/lib/audio/voice-catalog';
+import { applyVoiceOverrides } from '@/lib/audio/voice-override-rules';
+import { getServerVoiceOverrides } from '@/lib/admin/voice-overrides';
 import { supportsVoiceRegistration } from '@/lib/audio/voice-registration';
 import { AGENT_COLOR_PALETTE, AGENT_DEFAULT_AVATARS } from '@/lib/constants/agent-defaults';
 import { enabledServerTTSProviderIds, resolveTTSApiKey } from '@/lib/server/provider-config';
@@ -109,7 +111,16 @@ export function agentVoiceCatalog(registeredVoices: RegisteredVoiceInfo[] = []):
       continue;
     }
     if (config.requiresApiKey && !resolveTTSApiKey(id)) continue;
-    providers.push(config);
+    // Same admin overlay the client picker folds in: list_voices must report
+    // exactly what the picker offers (renames, hidden voices, additions), or
+    // the agent advertises a voice the user cannot re-pick.
+    providers.push({
+      ...config,
+      voices: applyVoiceOverrides(
+        config.voices,
+        getServerVoiceOverrides().filter((row) => row.providerId === id),
+      ),
+    });
   }
   // A registration backend means clone-kind registered voices are
   // synthesizable and therefore bindable (the session loop is live).

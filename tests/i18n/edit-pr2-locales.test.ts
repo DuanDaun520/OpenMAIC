@@ -1,18 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import enUS from '@/lib/i18n/locales/en-US.json';
 import zhCN from '@/lib/i18n/locales/zh-CN.json';
-import zhTW from '@/lib/i18n/locales/zh-TW.json';
-import jaJP from '@/lib/i18n/locales/ja-JP.json';
-import ruRU from '@/lib/i18n/locales/ru-RU.json';
-import arSA from '@/lib/i18n/locales/ar-SA.json';
 
 const locales = {
   'en-US': enUS,
   'zh-CN': zhCN,
-  'zh-TW': zhTW,
-  'ja-JP': jaJP,
-  'ru-RU': ruRU,
-  'ar-SA': arSA,
 };
 const KEYS = [
   'edit.delete',

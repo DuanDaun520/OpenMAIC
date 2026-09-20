@@ -8,7 +8,7 @@
  * inside the store's transaction (`persistStage` re-checks the owner scope).
  *
  * - GET    returns the whole document (stage + scenes + outline).
- * - PATCH  renames the course ({ name }), the reference's update path.
+ * - PATCH  renames the course and/or sets its description ({ name?, description? }).
  * - PUT    saves a whole document ({ stage, scenes, outline? }) — the coarse
  *          "update stage document" write the UI saves through; the server
  *          bumps `stage.updatedAt` so the freshness signal sees the change.
@@ -26,7 +26,10 @@ import { apiError } from '@/lib/server/api-response';
 import { getOwnerScopedDocumentStore } from '@/lib/server/agent-runtime/owner-scoped-documents';
 import { ownerApiError, ownerJson, ownerNotFound } from '@/lib/server/agent-runtime/route-response';
 import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
-import { STAGE_NAME_MAX_LENGTH } from '@/lib/server/agent-runtime/stage-limits';
+import {
+  STAGE_NAME_MAX_LENGTH,
+  STAGE_DESCRIPTION_MAX_LENGTH,
+} from '@/lib/server/agent-runtime/stage-limits';
 
 export const runtime = 'nodejs';
 
@@ -74,7 +77,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   });
 }
 
-// PATCH /api/stages/[id] — rename the course (owner-only).
+// PATCH /api/stages/[id] — rename the course and/or set its description
+// (owner-only). `{ name }` alone stays the reference rename path; `description`
+// may be a string or null (clears it).
 export async function PATCH(req: NextRequest, { params }: Params) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
@@ -84,17 +89,43 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   } catch {
     return apiError('INVALID_REQUEST', 400, 'invalid JSON body');
   }
-  const rawName = (body as { name?: unknown })?.name;
-  if (typeof rawName !== 'string' || rawName.trim().length === 0) {
-    return apiError('INVALID_REQUEST', 400, 'name must be a non-empty string');
+  const { name: rawName, description: rawDescription } = body as {
+    name?: unknown;
+    description?: unknown;
+  };
+  if (rawName === undefined && rawDescription === undefined) {
+    return apiError('INVALID_REQUEST', 400, 'provide name and/or description to update');
   }
-  const name = rawName.trim();
-  if (name.length > STAGE_NAME_MAX_LENGTH) {
-    return apiError(
-      'INVALID_REQUEST',
-      400,
-      `name exceeds the ${STAGE_NAME_MAX_LENGTH} character limit`,
-    );
+  let name: string | undefined;
+  if (rawName !== undefined) {
+    if (typeof rawName !== 'string' || rawName.trim().length === 0) {
+      return apiError('INVALID_REQUEST', 400, 'name must be a non-empty string');
+    }
+    name = rawName.trim();
+    if (name.length > STAGE_NAME_MAX_LENGTH) {
+      return apiError(
+        'INVALID_REQUEST',
+        400,
+        `name exceeds the ${STAGE_NAME_MAX_LENGTH} character limit`,
+      );
+    }
+  }
+  let description: string | null | undefined;
+  if (rawDescription !== undefined) {
+    if (rawDescription === null) {
+      description = null;
+    } else if (typeof rawDescription === 'string') {
+      description = rawDescription.trim() || null;
+      if (description !== null && description.length > STAGE_DESCRIPTION_MAX_LENGTH) {
+        return apiError(
+          'INVALID_REQUEST',
+          400,
+          `description exceeds the ${STAGE_DESCRIPTION_MAX_LENGTH} character limit`,
+        );
+      }
+    } else {
+      return apiError('INVALID_REQUEST', 400, 'description must be a string or null');
+    }
   }
 
   return withRequestOwnerId(req, async (ownerId, responseHeaders) => {
@@ -102,15 +133,25 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     const store = await getOwnerScopedDocumentStore(ownerId);
     const document = await store.loadDocument(id);
     if (!document) return ownerNotFound(responseHeaders);
+    // Build the next stage explicitly. A null description must DROP the
+    // member (the store's write boundary treats undefined-valued members as
+    // absent) — spreading the old stage over the omission would resurrect
+    // the previous value, so clearing goes through `delete`.
+    const nextStage = { ...document.stage };
+    if (name !== undefined) nextStage.name = name;
+    if (description === null) delete nextStage.description;
+    else if (description !== undefined) nextStage.description = description;
+    nextStage.updatedAt = Date.now();
     try {
-      await store.saveDocument({
-        ...document,
-        stage: { ...document.stage, name, updatedAt: Date.now() },
-      });
+      await store.saveDocument({ ...document, stage: nextStage });
     } catch (error) {
       return mapSaveError(error, responseHeaders);
     }
-    return ownerJson({ success: true, name }, 200, responseHeaders);
+    return ownerJson(
+      { success: true, ...(name !== undefined ? { name } : {}) },
+      200,
+      responseHeaders,
+    );
   });
 }
 

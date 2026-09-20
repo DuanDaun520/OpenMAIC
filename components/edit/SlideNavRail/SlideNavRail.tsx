@@ -1,12 +1,11 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { AnimatePresence, Reorder, motion, useReducedMotion } from 'motion/react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { useBrand, useIsDesktop } from '@/lib/brand/brand-context';
+import { useIsDesktop } from '@/lib/brand/brand-context';
 import { useStageStore } from '@/lib/store';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useI18n } from '@/lib/hooks/use-i18n';
@@ -50,8 +49,6 @@ const RAIL_MAX_PX = 360;
  */
 export function SlideNavRail() {
   const { t } = useI18n();
-  const router = useRouter();
-  const brand = useBrand();
   const isDesktop = useIsDesktop();
   const inWorkbenchPanel = useInWorkbenchPanel();
   const scenes = useStageStore.use.scenes();
@@ -390,8 +387,9 @@ export function SlideNavRail() {
         </button>
       )}
 
-      {/* Header band — mirrors playback `SceneSidebar`: OpenMAIC logo on
-          the left (click → home). Height (h-10 + mt-3 + mb-1 = ~56px)
+      {/* Header band — mirrors playback `SceneSidebar` exactly: /logo.png
+          icon + "AI Classroom" wordmark, non-navigating branding (home is
+          the CommandBar's back arrow). Height (h-10 + mt-3 + mb-1 = ~56px)
           matches playback so the chrome top edge stays at the same screen
           pixel across the mode swap. Inside the workbench panel the band
           is dropped entirely — its only other occupant, the collapse
@@ -400,16 +398,12 @@ export function SlideNavRail() {
       {!inWorkbenchPanel && !collapsed && (
         <div className="shrink-0 px-3 mt-3 mb-1 h-10 flex items-center">
           {!collapsed && !isDesktop && (
-            <button
-              type="button"
-              onClick={() => router.push('/')}
-              title={t('generation.backToHome')}
-              className="flex items-center gap-2 cursor-pointer rounded-lg px-1.5 -mx-1.5 py-1 -my-1 hover:bg-gray-100/80 dark:hover:bg-gray-800/60 active:scale-[0.97] transition-all duration-150"
-            >
-              {/* Desktop client: the Electron title bar already shows the brand icon + name, so the edit rail doesn't repeat it;
-                  returning home is handled by the edit bar's CommandBar back arrow. */}
-              <img src={brand.logoSrc} alt={brand.productName} className="h-6 w-auto" />
-            </button>
+            <div className="flex items-center gap-2 px-1.5 select-none">
+              <img src="/logo.png" alt="AI Classroom" className="h-6 w-6 rounded-md" />
+              <span className="text-[17px] font-bold tracking-tight text-gray-800 dark:text-gray-200">
+                AI Classroom
+              </span>
+            </div>
           )}
         </div>
       )}

@@ -8,6 +8,6 @@ export function translate(locale: string, key: string): string {
   return i18n.t(key, { lng: locale });
 }
 
-export function getClientTranslation(key: string): string {
-  return i18n.t(key);
+export function getClientTranslation(key: string, params?: Record<string, unknown>): string {
+  return i18n.t(key, params ?? {});
 }

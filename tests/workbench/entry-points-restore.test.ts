@@ -177,18 +177,8 @@ describe('entry point 2 — the composer attach control', () => {
 
   it('carries the reference’s own copy in every locale', () => {
     const expected: Record<string, string> = {
-      'ar-SA': 'إرفاق مواد',
-      'de-DE': 'Attach material',
       'en-US': 'Attach material',
-      'es-MX': 'Adjuntar material',
-      'fr-FR': 'Joindre un support',
-      'ja-JP': '教材を添付',
-      'ko-KR': '자료 첨부',
-      'pt-BR': 'Anexar material',
-      'ru-RU': 'Прикрепить материал',
-      'vi-VN': 'Đính kèm tài liệu',
       'zh-CN': '添加材料',
-      'zh-TW': '添加材料',
     };
     for (const [locale, copy] of Object.entries(expected)) {
       const parsed = JSON.parse(read(`lib/i18n/locales/${locale}.json`)) as {

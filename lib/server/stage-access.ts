@@ -9,6 +9,7 @@
  * (`/api/stage-meta/:id`, `/api/stages/:id/status`, publish/unpublish,
  * generation-complete) go through.
  */
+import { getAdminPool } from '@/lib/admin/db';
 import { getServerPersistenceProvider } from '@/lib/persistence/server-provider';
 
 /** The minimal query surface this module needs; keeps it pool-agnostic for tests. */
@@ -26,8 +27,14 @@ export interface StageAccess {
   isPublic: boolean;
   publishedAt: number | null;
   generationComplete: boolean;
+  /** Server-clock epoch millis of the last generation liveness pulse. */
+  generationHeartbeatAt: number | null;
+  /** Last recorded generation failure reason, when one is on record. */
+  generationError: string | null;
   source: 'document';
   deletedAt: Date | null;
+  /** Explicit AI-generated cover (course_user_meta.cover_url), else null. */
+  coverUrl: string | null;
 }
 
 interface RawAccessRow extends Record<string, unknown> {
@@ -35,20 +42,27 @@ interface RawAccessRow extends Record<string, unknown> {
   meta_is_public: boolean | null;
   meta_published_at: string | number | null;
   meta_generation_complete: boolean | null;
+  meta_generation_heartbeat_at: number | string | null;
+  meta_generation_error: string | null;
   meta_deleted_at: Date | string | null;
   document_name: string | null;
+  cover_url: string | null;
 }
 
 const ACCESS_SQL = `
-  SELECT m.owner_id            AS meta_owner_id,
-         m.is_public           AS meta_is_public,
-         m.published_at        AS meta_published_at,
-         m.generation_complete AS meta_generation_complete,
-         m.deleted_at          AS meta_deleted_at,
-         d.name                AS document_name
+  SELECT m.owner_id                  AS meta_owner_id,
+         m.is_public                 AS meta_is_public,
+         m.published_at              AS meta_published_at,
+         m.generation_complete       AS meta_generation_complete,
+         m.generation_heartbeat_at   AS meta_generation_heartbeat_at,
+         m.generation_error          AS meta_generation_error,
+         m.deleted_at                AS meta_deleted_at,
+         d.name                      AS document_name,
+         cov.cover_url               AS cover_url
     FROM (SELECT $1::text AS stage_id) k
     LEFT JOIN stage_meta      m ON m.stage_id = k.stage_id
     LEFT JOIN document_stages d ON d.id       = k.stage_id
+    LEFT JOIN course_user_meta cov ON cov.stage_id = k.stage_id
 `;
 
 function toEpochMillis(value: string | number | null): number | null {
@@ -82,6 +96,12 @@ async function queryableFor(): Promise<StageAccessQueryable> {
 
 /** The stage-meta query surface backed by the server persistence provider's pool. */
 export async function getStageAccessDb(): Promise<StageAccessQueryable> {
+  // ACCESS_SQL joins course_user_meta (the explicit AI cover), which the admin
+  // schema owns. Bootstrap it first so a fresh database cannot turn every
+  // stage-meta read into a missing-relation 500; the call is memoized, so this
+  // is a one-time DDL no-op afterwards. Injected-queryable callers (tests,
+  // offline tooling) never pass through here.
+  if (process.env.DATABASE_URL) await getAdminPool();
   const { pool } = await getServerPersistenceProvider(process.env.DATABASE_URL ?? '');
   return pool as unknown as StageAccessQueryable;
 }
@@ -110,8 +130,14 @@ export async function readStageAccessIncludingDeleted(
     isPublic: row.meta_is_public === true,
     publishedAt: toEpochMillis(row.meta_published_at),
     generationComplete: row.meta_generation_complete === true,
+    generationHeartbeatAt: toEpochMillis(row.meta_generation_heartbeat_at),
+    generationError:
+      typeof row.meta_generation_error === 'string' && row.meta_generation_error.length > 0
+        ? row.meta_generation_error
+        : null,
     source: 'document',
     deletedAt: toDate(row.meta_deleted_at),
+    coverUrl: typeof row.cover_url === 'string' && row.cover_url.length > 0 ? row.cover_url : null,
   };
 }
 

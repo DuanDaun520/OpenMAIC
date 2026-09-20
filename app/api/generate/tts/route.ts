@@ -27,6 +27,8 @@ import {
 import type { TTSProviderId } from '@/lib/audio/types';
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { quotaGateForRequest } from '@/lib/admin/quota';
+import { readAuthAwareOwnerId } from '@/lib/server/agent-runtime/auth-owner';
 import { findUnsafeNetworkTargetError, validatePublicUrlForSSRF } from '@/lib/server/ssrf-guard';
 import { VOXCPM_AUTO_VOICE_ID, VOXCPM_TTS_PROVIDER_ID } from '@/lib/audio/voxcpm';
 import { QwenVoiceCloneError, qwenVoiceCloneErrorMessage } from '@/lib/audio/qwen-voice-clone';
@@ -37,6 +39,11 @@ const log = createLogger('TTS API');
 export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
+  // Quota gate: a no-op unless enforcement is double-switched on (env flag +
+  // console policy). See lib/admin/quota.ts.
+  const quotaGate = await quotaGateForRequest(req);
+  if (quotaGate) return quotaGate;
+
   let ttsProviderId: string | undefined;
   let ttsVoice: string | undefined;
   let audioId: string | undefined;
@@ -159,6 +166,7 @@ export async function POST(req: NextRequest) {
       providerId: ttsProviderId,
       modelId: config.modelId,
       quantity: text.length,
+      actor: { ownerId: await readAuthAwareOwnerId(req) },
     });
 
     // Convert to base64

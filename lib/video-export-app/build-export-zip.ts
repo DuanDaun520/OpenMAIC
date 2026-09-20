@@ -16,7 +16,7 @@
  */
 import { compileVideoTimeline, emitHyperframes, toSrt, toVtt } from '@/lib/video-export';
 import { useStageStore } from '@/lib/store';
-import type { Locale } from '@/lib/i18n';
+import type { ExportLocale } from '@/lib/video-export-app/cover-config';
 import { resolveExportStageName } from './resolve-stage-name';
 import { createVideoTimelineDeps } from './timeline-deps';
 import { collectVideoAssets } from './collect';
@@ -73,7 +73,7 @@ function configuredVideoExportCta() {
  */
 async function compileStageIr(options: {
   resolution: VideoResolution;
-  locale: Locale;
+  locale: ExportLocale;
   labels: ReturnType<typeof getVideoExportCoverLabels>;
   skipGeometry?: boolean;
   skipInteractiveHtml?: boolean;
@@ -126,7 +126,7 @@ export interface BuildExportZipOptions {
   /** Burn the subtitle overlay into the video. Default false (sidecar SRT/VTT only). */
   burnInSubtitles?: boolean;
   /** Locale the card chrome and the emitted document are written in. */
-  locale: Locale;
+  locale: ExportLocale;
 }
 
 /**
@@ -202,7 +202,7 @@ export interface CompiledSubtitles {
  */
 export interface CompileSubtitlesOptions {
   resolution: VideoResolution;
-  locale: Locale;
+  locale: ExportLocale;
 }
 
 export async function compileSubtitles(

@@ -86,13 +86,13 @@ describe('disabling the active provider switches selection away', () => {
     expect(useSettingsStore.getState().ttsProviderId).toBe('browser-native-tts');
   });
 
-  it('web search: disabling the selected provider falls back to tavily', () => {
+  it('web search: disabling the selected provider falls back to serpbase', () => {
     const s = useSettingsStore.getState();
     s.setWebSearchProvider('bocha');
     expect(useSettingsStore.getState().webSearchProviderId).toBe('bocha');
 
     s.setWebSearchProviderConfig('bocha', { enabled: false });
-    expect(useSettingsStore.getState().webSearchProviderId).toBe('tavily');
+    expect(useSettingsStore.getState().webSearchProviderId).toBe('serpbase');
   });
 
   it('enabling/other edits do NOT force a switch away', () => {

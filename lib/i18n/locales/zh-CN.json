@@ -10,14 +10,19 @@
     "close": "关闭"
   },
   "home": {
-    "slogan": "Generative Learning in Multi-Agent Interactive Classroom",
-    "greetingWithName": "嗨，{{name}}"
+    "slogan": "AI生成课件+交互课堂：让学习变得轻松",
+    "knowYou": "HI，让AI老师更了解你",
+    "recommendedTitle": "推荐课程",
+    "recommendedSubtitle": "精选好课，点击卡片直达课堂",
+    "recommendedEmpty": "暂无推荐课程",
+    "recommendedCategoryFallback": "综合",
+    "recommendedTagAi": "AI 生成",
+    "recommendedAuthor": "AI Classroom"
   },
   "toolbar": {
     "pdfParser": "解析器",
     "pdfUpload": "上传 PDF",
     "removePdf": "移除文件",
-    "documentExtractor": "文档解析器",
     "courseMaterialUpload": "上传课程材料",
     "courseMaterialsSelected": "已选择 {{n}} 个材料",
     "courseMaterialMergeOrder": "材料会按下方显示顺序合并。",
@@ -30,7 +35,7 @@
     "selectProvider": "选择模型服务商",
     "configureProvider": "配置模型",
     "configureProviderHint": "请先配置至少一个模型服务商才能生成课程",
-    "enterClassroom": "进入课堂",
+    "generateCourseware": "生成课件",
     "advancedSettings": "高级设置",
     "thinking": "思考",
     "thinkingBudget": "预算",
@@ -200,9 +205,9 @@
     }
   },
   "agentBar": {
-    "readyToLearn": "准备好一起学习了吗？",
-    "expandedTitle": "课堂角色配置",
-    "configTooltip": "点击配置课堂角色",
+    "presetLabel": "预设AI老师与同学",
+    "presetTitle": "预设AI老师与同学",
+    "configTooltip": "点击预设AI老师与同学",
     "voiceLabel": "音色",
     "voiceLoading": "加载中...",
     "voiceAutoAssign": "音色将自动分配",
@@ -226,6 +231,8 @@
     "generating": "生成中...",
     "paused": "已暂停",
     "generationFailed": "生成失败",
+    "generationInterrupted": "生成已中断",
+    "generationInterruptedReason": "生成过程中页面被关闭或中断，未完成的页面已停止。可点击重试继续生成。",
     "confirmSwitchTitle": "切换页面",
     "confirmSwitchMessage": "当前话题正在进行中，切换页面将结束当前话题。确定要切换吗？",
     "generatingNextPage": "场景正在生成，请稍候...",
@@ -234,7 +241,20 @@
     "exitFullscreen": "退出全屏",
     "editCourse": "编辑课程",
     "doneEditing": "完成编辑",
-    "proModeDisabledHint": "本页不支持编辑——打开任意课程页即可使用 Pro 模式编辑。"
+    "proModeDisabledHint": "本页不支持编辑——打开任意课程页即可进入修改课件模式。",
+    "confirmLeaveHome": "确认离开教室，打开首页吗？",
+    "confirmLeaveBack": "确认要离开教程吗？",
+    "backToPrevPage": "返回上一页",
+    "togglePageList": "展开/收起页面列表",
+    "toggleChatPanel": "展开/收起对话面板",
+    "courseInfo": "课件信息",
+    "courseInfoName": "课程名称",
+    "courseInfoDesc": "简介",
+    "courseInfoAuthor": "作者",
+    "courseInfoCreatedAt": "创建时间",
+    "courseInfoNoDesc": "暂无简介",
+    "courseInfoAuthorSelf": "我",
+    "courseInfoAuthorAnonymous": "匿名用户"
   },
   "edit": {
     "proMode": "专业模式",
@@ -647,7 +667,8 @@
     "dock": {
       "elementRefHint": "元素引用 —— 选中元素随下一条消息发给 Agent",
       "globalTools": "全局工具"
-    }
+    },
+    "coursewareMode": "修改课件模式"
   },
   "classroomComplete": {
     "title": "课程完成",
@@ -1019,7 +1040,7 @@
     "pdfSizeLimit": "支持最大50MB的PDF文件",
     "courseMaterialSizeLimit": "支持文档、演示、表格、图像、纯文本，最大 50MB（具体支持格式随所选解析器而定）",
     "generateFailed": "生成课堂失败，请重试",
-    "requirementPlaceholder": "输入你想学的任何内容，例如：\n「从零学 Python，30 分钟写出第一个程序」\n「用白板给我讲解傅里叶变换」\n「阿瓦隆桌游怎么玩」",
+    "requirementPlaceholder": "输入你想学的任何东西，如：\n【毛利率的基础知识入门】\n【销量预测怎么做？多准备一些演示和课堂探讨】\n【从0开始学SQL，我非常擅长Excel，怎么用Excel操作习惯学会SQL】\n【品类策略基础知识，需要生动活跃，准备至少15页教程，图文并茂。】\n【药品采购同学，怎么核算商品的成本？】",
     "requirementRequired": "请输入课程需求",
     "fileTooLarge": "文件过大，请选择小于 50MB 的文件",
     "courseMaterialCountLimit": "最多可上传 5 个课程材料文件",
@@ -1192,10 +1213,10 @@
     "agentNames": {
       "default-1": "AI教师",
       "default-2": "AI助教",
-      "default-3": "显眼包",
-      "default-4": "好奇宝宝",
-      "default-5": "笔记员",
-      "default-6": "思考者"
+      "default-3": "小趣(趣梗搭子)",
+      "default-4": "小奇(好奇同学)",
+      "default-5": "小勤(勤奋记录员)",
+      "default-6": "小思(学习委员)"
     },
     "agentRoles": {
       "teacher": "教师",
@@ -1233,6 +1254,7 @@
       "xiaomi": "小米 MiMo",
       "lemonade": "Lemonade（本地）",
       "ollama": "Ollama（本地模型）",
+      "serpbase": "SerpBase",
       "tavily": "Tavily",
       "exa": "Exa",
       "bocha": "博查",
@@ -1987,7 +2009,10 @@
     "avatarHint": "你的头像将显示在课堂讨论和对话中",
     "fileTooLarge": "图片过大，请选择小于 5MB 的图片",
     "invalidFileType": "请选择图片文件",
-    "editTooltip": "点击编辑个人资料"
+    "editTooltip": "点击编辑个人资料",
+    "knowYouTitle": "让AI老师更了解你",
+    "bioHint": "你可以介绍一下自己，对当前知识点的了解程度。",
+    "done": "完成"
   },
   "media": {
     "imageCapability": "图像生成",
@@ -2008,6 +2033,39 @@
     "title": "请输入访问码",
     "placeholder": "访问码",
     "error": "访问码错误，请重试。"
+  },
+  "login": {
+    "title": "欢迎回来",
+    "description": "请输入工号和密码登录后开始学习",
+    "username": "工号",
+    "password": "密码",
+    "submit": "登录",
+    "hint": "新增用户、忘记密码可以找管理员",
+    "failed": "登录失败，请稍后再试",
+    "networkError": "网络错误，请稍后再试",
+    "loginFirst": "请先登录后再制作课程",
+    "backHome": "返回首页"
+  },
+  "generationLog": {
+    "title": "课件AI制作日志",
+    "clear": "清空",
+    "empty": "暂无制作日志",
+    "generating": "AI 正在制作课件",
+    "failedCount": "{{count}} 页生成失败，点击查看制作日志",
+    "m": {
+      "start": "开始生成：共 {{count}} 页待制作",
+      "contentStart": "第 {{order}} 页「{{title}}」：正在生成页面内容",
+      "actionsStart": "第 {{order}} 页「{{title}}」：正在生成讲解动作与配音",
+      "sceneDone": "第 {{order}} 页「{{title}}」制作完成",
+      "contentFailed": "第 {{order}} 页「{{title}}」内容生成失败：{{error}}",
+      "actionsFailed": "第 {{order}} 页「{{title}}」讲解动作生成失败：{{error}}",
+      "ttsFailed": "第 {{order}} 页「{{title}}」语音合成失败：{{error}}",
+      "failed": "第 {{order}} 页「{{title}}」生成失败：{{error}}",
+      "mediaFailed": "配图/视频素材生成出现问题：{{error}}",
+      "retry": "重试第 {{order}} 页「{{title}}」",
+      "completed": "全部 {{count}} 页制作完成",
+      "paused": "生成已暂停"
+    }
   },
   "proMode": {
     "attach": "添加材料",

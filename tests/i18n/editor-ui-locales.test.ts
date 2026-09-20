@@ -1,16 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import arSA from '@/lib/i18n/locales/ar-SA.json';
 import enUS from '@/lib/i18n/locales/en-US.json';
-import esMX from '@/lib/i18n/locales/es-MX.json';
-import frFR from '@/lib/i18n/locales/fr-FR.json';
-import jaJP from '@/lib/i18n/locales/ja-JP.json';
-import koKR from '@/lib/i18n/locales/ko-KR.json';
-import ptBR from '@/lib/i18n/locales/pt-BR.json';
-import ruRU from '@/lib/i18n/locales/ru-RU.json';
 import zhCN from '@/lib/i18n/locales/zh-CN.json';
-import zhTW from '@/lib/i18n/locales/zh-TW.json';
 
-const locales = { arSA, enUS, esMX, frFR, jaJP, koKR, ptBR, ruRU, zhCN, zhTW };
+const locales = { enUS, zhCN };
 const editorUiKeys = [
   'insert.toolbar',
   'asset.drop',

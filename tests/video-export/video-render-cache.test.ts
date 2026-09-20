@@ -48,10 +48,11 @@ import { useMediaGenerationStore } from '@/lib/store/media-generation';
 import { db } from '@/lib/utils/database';
 import i18n from '@/lib/i18n/config';
 import { notifyAssetReplaced } from '@/lib/media/asset-replacement-events';
-import type { Locale } from '@/lib/i18n';
+import type { ExportLocale } from '@/lib/video-export-app/cover-config';
 
 const t = vi.fn((key: string, _options?: Record<string, unknown>) => key);
-const start = (locale: Locale = 'en-US') => useVideoRenderStore.getState().startRender(t, locale);
+const start = (locale: ExportLocale = 'en-US') =>
+  useVideoRenderStore.getState().startRender(t, locale);
 const options = () => useVideoRenderStore.getState();
 const makeZip = () => ({
   zipBlob: new Blob(['archive']),

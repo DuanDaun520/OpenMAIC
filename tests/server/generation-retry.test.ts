@@ -66,6 +66,30 @@ describe('generation retry helper', () => {
     expect(isRetryableGenerationError({ isRetryable: true, statusCode: 400 })).toBe(true);
   });
 
+  it('classifies the BROWSER wording of network-level fetch failures as retryable', async () => {
+    // Chromium/Firefox raise TypeError("Failed to fetch"), Safari says
+    // "Load failed" — same transient transport failure as Node's "fetch
+    // failed", but worded so the old regex missed it and the scene failed
+    // on attempt 1 with zero retries.
+    expect(isRetryableGenerationError(new TypeError('Failed to fetch'))).toBe(true);
+    expect(isRetryableGenerationError(new TypeError('Load failed'))).toBe(true);
+
+    // And the retry loop actually retries it end-to-end.
+    const sleep = vi.fn(async () => undefined);
+    let attempts = 0;
+    const result = await withGenerationRetry(
+      async () => {
+        attempts += 1;
+        if (attempts === 1) throw new TypeError('Failed to fetch');
+        return 'scene-ok';
+      },
+      { label: 'scene 2 content', maxRetries: 2, sleep },
+    );
+
+    expect(result).toBe('scene-ok');
+    expect(attempts).toBe(2);
+  });
+
   it('classifies permanent request and auth failures as non-retryable', () => {
     expect(isRetryableGenerationError({ statusCode: 400 })).toBe(false);
     expect(isRetryableGenerationError({ statusCode: 401 })).toBe(false);

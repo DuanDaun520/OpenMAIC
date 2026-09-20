@@ -159,56 +159,6 @@ describe('getVideoExportCoverLabels', () => {
       pblCtaPrompt: '想亲自参与项目学习？',
       ctaVisit: '访问',
     },
-    'zh-TW': {
-      quizCtaPrompt: '想親自體驗互動測驗？',
-      pblCtaPrompt: '想親自參與專題式學習？',
-      ctaVisit: '前往',
-    },
-    'ja-JP': {
-      quizCtaPrompt: 'インタラクティブなクイズを体験しませんか？',
-      pblCtaPrompt: 'プロジェクト型学習を体験しませんか？',
-      ctaVisit: 'アクセス',
-    },
-    'ko-KR': {
-      quizCtaPrompt: '인터랙티브 퀴즈를 직접 체험해 보세요',
-      pblCtaPrompt: '프로젝트 기반 학습을 직접 체험해 보세요',
-      ctaVisit: '방문',
-    },
-    'es-MX': {
-      quizCtaPrompt: '¿Quieres probar un cuestionario interactivo?',
-      pblCtaPrompt: '¿Quieres explorar el aprendizaje basado en proyectos?',
-      ctaVisit: 'Visita',
-    },
-    'fr-FR': {
-      quizCtaPrompt: 'Envie d’essayer un quiz interactif ?',
-      pblCtaPrompt: 'Envie d’explorer l’apprentissage par projet ?',
-      ctaVisit: 'Découvrir',
-    },
-    'vi-VN': {
-      quizCtaPrompt: 'Muốn thử một bài trắc nghiệm tương tác?',
-      pblCtaPrompt: 'Muốn khám phá học tập theo dự án?',
-      ctaVisit: 'Ghé thăm',
-    },
-    'de-DE': {
-      quizCtaPrompt: 'Möchtest du ein interaktives Quiz ausprobieren?',
-      pblCtaPrompt: 'Möchtest du projektbasiertes Lernen entdecken?',
-      ctaVisit: 'Besuche',
-    },
-    'pt-BR': {
-      quizCtaPrompt: 'Quer experimentar um quiz interativo?',
-      pblCtaPrompt: 'Quer explorar a aprendizagem baseada em projetos?',
-      ctaVisit: 'Acesse',
-    },
-    'ru-RU': {
-      quizCtaPrompt: 'Хотите пройти интерактивный тест?',
-      pblCtaPrompt: 'Хотите попробовать проектное обучение?',
-      ctaVisit: 'Посетите',
-    },
-    'ar-SA': {
-      quizCtaPrompt: 'هل تريد تجربة اختبار تفاعلي؟',
-      pblCtaPrompt: 'هل تريد استكشاف التعلم القائم على المشاريع؟',
-      ctaVisit: 'تفضل بزيارة',
-    },
   };
 
   it.each(Object.entries(expectedCtaLabels) as Array<[Locale, (typeof expectedCtaLabels)[Locale]]>)(

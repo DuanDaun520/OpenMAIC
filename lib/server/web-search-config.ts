@@ -40,6 +40,7 @@ const OFFICIAL_CLIENT_BASE_URLS: Record<WebSearchProviderId, string[]> = {
     'https://api.minimax.io/v1/coding_plan/search',
   ],
   doubao: ['https://open.feedcoopapi.com', 'https://open.feedcoopapi.com/search_api/web_search'],
+  serpbase: ['https://api.serpbase.dev', 'https://api.serpbase.dev/google/search'],
   searxng: [],
 };
 

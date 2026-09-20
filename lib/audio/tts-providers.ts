@@ -95,6 +95,7 @@
 import type { TTSModelConfig } from './types';
 import { isCustomTTSProvider } from './types';
 import { isQwenCloneVoice, resolveTTSModelForVoice, TTS_PROVIDERS } from './constants';
+import { remapDoubaoSpeaker } from './doubao-remap';
 import { downloadAudio, QwenVoiceCloneError, synthesizeQwenVoiceClone } from './qwen-voice-clone';
 import { evictQwenVoiceRegistrationMemo } from './qwen-voice-clone-registration';
 import { splitConcatenatedJsonObjects } from './json-stream';
@@ -1123,6 +1124,12 @@ export { getAllTTSProviders, getTTSProvider, getTTSVoices } from './constants';
  * The endpoint and auth header are bound together, so we pick both from the key
  * shape — never a normal endpoint with X-Api-Key, or vice versa.
  */
+
+// Doubao cross-family speaker remapping lives in ./doubao-remap (pure helpers,
+// unit-tested there): the replacement speaker must preserve the original's
+// declared gender/language, or a female-labeled pick comes back as a male
+// voice — the "名字头像都是女、声音是男" mismatch.
+
 async function generateDoubaoTTS(
   config: TTSModelConfig,
   text: string,
@@ -1155,18 +1162,24 @@ async function generateDoubaoTTS(
     ? { 'X-Api-Key': rawKey }
     : { 'X-Api-App-Id': appId, 'X-Api-Access-Key': accessKey };
 
+  // Speech grants are bound to a resource id: the Seed-TTS 2.0 console
+  // product uses `seed-tts-2.0`, while other service types (e.g.
+  // `volc.service_type.10029`) are rejected with 45000030. Operators can
+  // pin the granted resource id via env instead of patching this file.
+  const resourceId = process.env.TTS_DOUBAO_RESOURCE_ID || 'seed-tts-2.0';
+
   const response = await ttsFetch(config.publicOnly, `${baseUrl}/unidirectional`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...authHeaders,
-      'X-Api-Resource-Id': 'seed-tts-2.0',
+      'X-Api-Resource-Id': resourceId,
     },
     body: JSON.stringify({
       user: { uid: 'openmaic' },
       req_params: {
         text,
-        speaker: config.voice,
+        speaker: remapDoubaoSpeaker(resourceId, config.voice),
         audio_params: { format: 'mp3', sample_rate: 24000, speech_rate: speechRate },
       },
     }),

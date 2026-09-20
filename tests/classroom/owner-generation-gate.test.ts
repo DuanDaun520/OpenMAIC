@@ -291,9 +291,31 @@ describe('classroom surfaces feed the sidecar into the gate', () => {
   // stop it, which no harness here can drive.
   it('aborts the previous media pass before starting another', () => {
     const source = readFileSync(join(process.cwd(), 'lib/hooks/use-scene-generator.ts'), 'utf8');
-    const abortAt = source.indexOf('mediaAbortRef.current?.abort()');
-    const installAt = source.indexOf('mediaAbortRef.current = new AbortController()');
+    const abortAt = source.indexOf('RUN.mediaAbort?.abort()');
+    const installAt = source.indexOf('RUN.mediaAbort = new AbortController()');
     expect(abortAt).toBeGreaterThan(0);
     expect(installAt).toBeGreaterThan(abortAt);
+  });
+
+  // Generation is background by default: leaving the classroom page must not
+  // pause the deck, so the surface never stops the run on unmount. The stop
+  // boundary moved into the run itself — it aborts when another course takes
+  // over the shared stage store (the subscription below), which is the only
+  // condition under which continuing would corrupt the store.
+  it('keeps generation running after the classroom unmounts', () => {
+    const surface = readFileSync(
+      join(process.cwd(), 'components/classroom/ClassroomSurface.tsx'),
+      'utf8',
+    );
+    expect(surface).not.toContain('stop()');
+    expect(surface).not.toMatch(/useSceneGenerator\(\{[\s\S]*?\bstop\b/);
+
+    const generator = readFileSync(join(process.cwd(), 'lib/hooks/use-scene-generator.ts'), 'utf8');
+    const subscribeAt = generator.indexOf('store.subscribe((next)');
+    const fetchAbortAt = generator.indexOf('RUN.fetchAbort?.abort()', subscribeAt);
+    const mediaAbortAt = generator.indexOf('RUN.mediaAbort?.abort()', subscribeAt);
+    expect(subscribeAt).toBeGreaterThan(0);
+    expect(fetchAbortAt).toBeGreaterThan(subscribeAt);
+    expect(mediaAbortAt).toBeGreaterThan(subscribeAt);
   });
 });

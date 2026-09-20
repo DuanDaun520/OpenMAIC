@@ -222,6 +222,9 @@ function clearedStageState(state: Pick<StageState, 'generationEpoch'>) {
     currentGeneratingOrder: -1,
     failedOutlines: [],
     generatingOutlines: [],
+    generationHeartbeatAt: null,
+    generationError: null,
+    generationInterrupted: false,
   };
 }
 
@@ -331,6 +334,19 @@ interface StageState {
   currentGeneratingOrder: number;
   failedOutlines: SceneOutline[];
 
+  /**
+   * Generation liveness, resolved from the stage-meta sidecar's heartbeat +
+   * error columns. A pending outline is only "generating" while some live tab
+   * pulses; once the heartbeat goes stale the pending outlines are seeded
+   * into `failedOutlines` (reason recorded in `generationError`) so the UI
+   * shows 失败/已中断 with the reason instead of an eternal spinner.
+   * `generationInterrupted` marks the no-error variant — the run died with
+   * the tab rather than failing on a provider error.
+   */
+  generationHeartbeatAt: number | null;
+  generationError: string | null;
+  generationInterrupted: boolean;
+
   // Workbench canvas-freshness projections (Mono #1960 Part 2 port).
   // The workbench stage-freshness sync records the manifest this browser has
   // actually rendered (`serverManifestByStage`) and the store's save paths may
@@ -367,9 +383,29 @@ interface StageState {
   setGenerationStatus: (status: 'idle' | 'generating' | 'paused' | 'completed' | 'error') => void;
   setCurrentGeneratingOrder: (order: number) => void;
   bumpGenerationEpoch: () => void;
-  addFailedOutline: (outline: SceneOutline) => void;
+  addFailedOutline: (outline: SceneOutline, error?: string) => void;
   clearFailedOutlines: () => void;
   retryFailedOutline: (outlineId: string) => void;
+  /**
+   * Fold the sidecar's generation heartbeat/error into the store. When the
+   * heartbeat is stale (or absent) and outlines are still pending, the pending
+   * outlines are seeded into `failedOutlines` so every existing failed-page
+   * surface (overlay, sidebar, retry) renders instead of the spinner.
+   */
+  applyGenerationMeta: (meta: {
+    heartbeatAt: number | null;
+    error: string | null;
+    /** Client clock at read time, compared against the server-written stamp. */
+    nowMs: number;
+    /** Display string used as the reason when no server error is on record. */
+    interruptedReason: string;
+    /** How old a heartbeat may be and still count as live. */
+    staleMs: number;
+  }) => void;
+  /** Record/clear the current generation failure reason (local failures). */
+  setGenerationError: (error: string | null) => void;
+  /** Reset failure presentation — called when a generation run (re)starts. */
+  clearGenerationFailure: () => void;
 
   // Getters
   getCurrentScene: () => Scene | null;
@@ -485,6 +521,9 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
   generationStatus: 'idle' as const,
   currentGeneratingOrder: -1,
   failedOutlines: [],
+  generationHeartbeatAt: null,
+  generationError: null,
+  generationInterrupted: false,
   serverManifestByStage: {},
   stageSyncRequest: 0,
 
@@ -796,10 +835,10 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
 
   bumpGenerationEpoch: () => set((s) => ({ generationEpoch: s.generationEpoch + 1 })),
 
-  addFailedOutline: (outline) => {
+  addFailedOutline: (outline, error) => {
     const existed = get().failedOutlines.some((o) => o.id === outline.id);
-    if (existed) return;
-    set({ failedOutlines: [...get().failedOutlines, outline] });
+    if (!existed) set({ failedOutlines: [...get().failedOutlines, outline] });
+    if (error) set({ generationError: error, generationInterrupted: false });
   },
 
   clearFailedOutlines: () => set({ failedOutlines: [] }),
@@ -809,6 +848,56 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
       failedOutlines: get().failedOutlines.filter((o) => o.id !== outlineId),
     });
   },
+
+  applyGenerationMeta: ({ heartbeatAt, error, nowMs, interruptedReason, staleMs }) => {
+    const state = get();
+    const live = heartbeatAt !== null && nowMs - heartbeatAt < staleMs;
+
+    // A live run owns the presentation: the spinner is true, and whatever
+    // failure state an earlier run left must not paint 失败 over it.
+    if (live) {
+      set({
+        generationHeartbeatAt: heartbeatAt,
+        generationInterrupted: false,
+        generationError: error,
+      });
+      return;
+    }
+
+    // Stale or absent heartbeat. Only seed when there is something pending to
+    // seed and no local run is active — a tab that IS generating has fresh
+    // pulses and would immediately overwrite this anyway, but the guard keeps
+    // the seed from flashing a failure frame during the resume effect's gap.
+    const seedable =
+      !state.generationComplete &&
+      state.generationStatus !== 'generating' &&
+      state.generatingOutlines.length > 0;
+    if (!seedable) {
+      set({ generationHeartbeatAt: heartbeatAt, generationError: error });
+      return;
+    }
+
+    // Reason precedence: a server-recorded error beats everything; otherwise a
+    // LOCAL failure this session already recorded keeps its more specific
+    // message (a re-seed must not flatten it to the generic interrupted
+    // reason); only a fresh load falls back to "interrupted".
+    const reason = error ?? state.generationError ?? interruptedReason;
+    const known = new Set(state.failedOutlines.map((o) => o.id));
+    const seeded = [
+      ...state.failedOutlines,
+      ...state.generatingOutlines.filter((o) => !known.has(o.id)),
+    ];
+    set({
+      generationHeartbeatAt: heartbeatAt,
+      failedOutlines: seeded,
+      generationError: reason,
+      generationInterrupted: error === null && state.generationError === null,
+    });
+  },
+
+  setGenerationError: (generationError) => set({ generationError }),
+
+  clearGenerationFailure: () => set({ generationError: null, generationInterrupted: false }),
 
   // Getters
   getCurrentScene: () => {

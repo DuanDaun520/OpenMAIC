@@ -2,11 +2,13 @@
  * /api/stages — the workbench's course-document index and create face.
  *
  * Every handler is owner-scoped exactly like the agent tools: the owner
- * resolves from the anonymous cookie (`withRequestOwnerId`) and is never a
- * request parameter, and all reads and writes go through the owner-bound
- * document store (`getOwnerScopedDocumentStore`), the same seam the runner
- * binds for the stage tools. A stage created here is visible to this browser
- * and to nobody else.
+ * resolves from the product session or the anonymous cookie
+ * (`withRequestOwnerId`) and is never a request parameter, and all reads and
+ * writes go through the owner-bound document store
+ * (`getOwnerScopedDocumentStore`), the same seam the runner binds for the
+ * stage tools. Creating a course requires a logged-in account (POST refuses
+ * anonymous owners with `login_required`, like publish); a stage created here
+ * belongs to that account and to nobody else.
  *
  * The configured runtime gates the whole family: these routes serve the
  * workbench, which is agent-runtime territory, so a runtime that is off OR
@@ -46,7 +48,9 @@ export async function GET(req: NextRequest) {
 //
 // Validation happens before owner resolution, like the agent session routes:
 // a malformed body must not mint an anonymous cookie partition for a request
-// that will not proceed.
+// that will not proceed. Creation itself is account-bound: an anonymous owner
+// is refused with the reference's `login_required` (mirroring publish), so a
+// course can never land in a partition a login would later have to claim.
 export async function POST(req: NextRequest) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
@@ -77,6 +81,10 @@ export async function POST(req: NextRequest) {
   const trimmedDescription = description?.trim();
 
   return withRequestOwnerId(req, async (ownerId, responseHeaders) => {
+    if (ownerId.startsWith('anon:')) {
+      return ownerJson({ error: 'login_required' }, 401, responseHeaders);
+    }
+
     const id = createStageId();
     const now = Date.now();
     const outline: AppDocumentOutline = {

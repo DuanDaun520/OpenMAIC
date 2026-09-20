@@ -36,6 +36,13 @@ export interface UsageRecordInput {
   quantity?: number;
   /** Unit for `quantity`. */
   unit?: UsageUnit;
+  /**
+   * Actor dimensions for the DB ledger (the jsonl log stays actor-free).
+   * `ownerId` is the product identity string (`anon:<uuid>` today); omit when
+   * the call site cannot attribute the request (e.g. the LLM dispatcher deep
+   * inside a stream) — those rows still aggregate by provider/model.
+   */
+  actor?: { ownerId?: string; stageId?: string };
 }
 
 /** A persisted usage row — pure usage, no cost. */
@@ -130,9 +137,44 @@ export async function recordUsage(
     const dir = usageDir(opts.baseDir);
     await fs.mkdir(dir, { recursive: true });
     await fs.appendFile(monthlyFile(dir, now), JSON.stringify(record) + '\n', 'utf-8');
+
+    mirrorUsageToLedger(record, input.actor);
   } catch (err) {
     log.warn('Failed to record usage (ignored):', err);
   }
+}
+
+/**
+ * Mirror one record into the DB `usage_ledger` (admin console's queryable
+ * twin of the jsonl log). Fire-and-forget and never throws; the sink itself
+ * no-ops without DATABASE_URL. Dynamic import keeps this module's static
+ * graph free of the pg stack for tests and non-DB deployments.
+ */
+function mirrorUsageToLedger(
+  record: UsageRecord,
+  actor?: { ownerId?: string; stageId?: string },
+): void {
+  void (async () => {
+    try {
+      const { recordUsageLedgerRow } = await import('@/lib/admin/usage-db');
+      await recordUsageLedgerRow({
+        capability: record.kind,
+        source: record.source,
+        providerId: record.providerId,
+        modelId: record.modelId,
+        ownerId: actor?.ownerId,
+        stageId: actor?.stageId,
+        inputTokens: record.inputTokens,
+        outputTokens: record.outputTokens,
+        quantity:
+          record.kind === 'llm' ? record.inputTokens + record.outputTokens : (record.quantity ?? 0),
+        unit: record.unit,
+      });
+    } catch {
+      // Unreachable in practice — the sink swallows its own errors — but a
+      // mirror must never take generation down, whatever happens.
+    }
+  })();
 }
 
 /** A non-LLM modality usage event (image / video / tts / asr). */
@@ -143,6 +185,8 @@ export interface GenerationUsageInput {
   /** The client-requested model id; falls back to providerId when absent. */
   modelId?: string;
   quantity: number;
+  /** Actor dimensions for the DB ledger; optional like in {@link UsageRecordInput}. */
+  actor?: { ownerId?: string; stageId?: string };
 }
 
 /**
@@ -161,6 +205,7 @@ export function recordGenerationUsage(input: GenerationUsageInput): Promise<void
     modelId,
     modelString: `${input.providerId}:${modelId}`,
     quantity: input.quantity,
+    actor: input.actor,
   });
 }
 

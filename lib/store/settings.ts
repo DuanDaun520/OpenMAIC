@@ -46,7 +46,21 @@ import { isTTSProviderEnabled } from '@/lib/audio/provider-enablement';
 const log = createLogger('Settings');
 
 /** Persisted-blob version for zustand's `persist` `migrate` ladder. */
-const SETTINGS_PERSIST_VERSION = 4;
+export const SETTINGS_PERSIST_VERSION = 5;
+
+/**
+ * The full default roster — teacher + AI助教 + 学生1-4 — selected whenever the
+ * user has not made an explicit narrower choice. Shared by the store default,
+ * the v5 migration, and the AgentBar/classroom fallbacks.
+ */
+const DEFAULT_AGENT_LINEUP = [
+  'default-1',
+  'default-2',
+  'default-3',
+  'default-4',
+  'default-5',
+  'default-6',
+] as const;
 
 /**
  * Bound after the store exists; see `onWriteRefused` for why it is not inlined.
@@ -615,8 +629,14 @@ const getDefaultVideoConfig = () => ({
 
 // Initialize default Web Search config
 const getDefaultWebSearchConfig = () => ({
-  webSearchProviderId: 'tavily' as WebSearchProviderId,
+  webSearchProviderId: 'serpbase' as WebSearchProviderId,
   webSearchProvidersConfig: {
+    serpbase: {
+      apiKey: '',
+      baseUrl: WEB_SEARCH_PROVIDERS.serpbase.defaultBaseUrl || '',
+      enabled: true,
+      requiresApiKey: true,
+    },
     tavily: { apiKey: '', baseUrl: '', enabled: true, requiresApiKey: true },
     exa: {
       apiKey: '',
@@ -943,8 +963,8 @@ export const useSettingsStore = create<SettingsState>()(
         thinkingConfigs: {},
         providersConfig: getDefaultProvidersConfig(),
         ttsModel: 'openai-tts',
-        selectedAgentIds: ['default-1', 'default-2', 'default-3'],
-        agentMode: 'auto' as const,
+        selectedAgentIds: [...DEFAULT_AGENT_LINEUP],
+        agentMode: 'preset' as const,
         autoAgentCount: 3,
         agentVoiceOverrides: {},
         agentSelectionIsUserSet: false,
@@ -1770,7 +1790,7 @@ export const useSettingsStore = create<SettingsState>()(
                 state.webSearchProviderId,
                 newWebSearchConfig,
                 webSearchFallback,
-                'tavily' as WebSearchProviderId,
+                'serpbase' as WebSearchProviderId,
               );
 
               // Auto-recover: when the selected provider is empty/unusable but
@@ -2234,6 +2254,32 @@ export const useSettingsStore = create<SettingsState>()(
             const cfg = state.ttsProvidersConfig[pid];
             if (cfg) cfg.enabled = pid !== 'browser-native-tts';
           }
+        }
+
+        // v4 → v5: the default classroom becomes 预设模式 with the full default
+        // lineup (teacher + AI助教 + 学生1-4). `agentMode` resets once for
+        // everyone — the previous 'auto' default was a product decision, not a
+        // user choice. A persisted selection that was never user-set (or was
+        // exactly the old default trio) upgrades to the full lineup; an explicit
+        // subset keeps its picks, filtered to the default agents so stale
+        // auto-generated ids cannot survive the preset flip.
+        if (version < 5) {
+          const stateRecord = state as Record<string, unknown>;
+          stateRecord.agentMode = 'preset';
+          const persistedIds = Array.isArray(stateRecord.selectedAgentIds)
+            ? (stateRecord.selectedAgentIds as unknown[]).filter(
+                (id): id is string => typeof id === 'string',
+              )
+            : [];
+          const isOldDefaultTrio =
+            persistedIds.length === 3 &&
+            persistedIds.every((id, index) => id === `default-${index + 1}`);
+          const lineup = new Set<string>(DEFAULT_AGENT_LINEUP);
+          const kept = persistedIds.filter((id) => lineup.has(id));
+          stateRecord.selectedAgentIds =
+            !stateRecord.agentSelectionIsUserSet || isOldDefaultTrio || kept.length === 0
+              ? [...DEFAULT_AGENT_LINEUP]
+              : kept;
         }
 
         ensureValidProviderSelections(state);

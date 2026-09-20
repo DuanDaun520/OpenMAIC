@@ -15,6 +15,10 @@ import {
   type VoxCPMVoicePromptContext,
 } from '@/lib/audio/voxcpm';
 import {
+  ensureVoiceOverridesLoaded,
+  useVoiceOverridesVersion,
+} from '@/lib/audio/voice-overrides-client';
+import {
   deleteRegisteredVoice,
   ensureRegisteredVoice,
   registerVoiceFromReference,
@@ -319,6 +323,9 @@ export function useVoxCPMVoiceProfiles() {
 export function useAllVoiceProfiles() {
   const [profiles, setProfiles] = useState<VoiceProfileRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  // Subscribe to the admin voice overlay so the picker re-renders when the
+  // curated list lands; the fetch itself is idempotent and TTL-cached.
+  useVoiceOverridesVersion();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -332,6 +339,7 @@ export function useAllVoiceProfiles() {
   }, []);
 
   useEffect(() => {
+    void ensureVoiceOverridesLoaded();
     void refresh();
     window.addEventListener(VOICE_PROFILES_CHANGED, refresh);
     return () => window.removeEventListener(VOICE_PROFILES_CHANGED, refresh);

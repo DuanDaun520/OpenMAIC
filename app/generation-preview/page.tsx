@@ -795,6 +795,50 @@ function GenerationPreviewContent() {
               path: '/avatars/thinker-2.png',
               desc: 'Girl reading a book intently, long dark hair, intellectual and focused',
             },
+            {
+              path: '/avatars/teacher-3.png',
+              desc: 'Male teacher with rectangular glasses and blue blazer, raised finger and glowing idea lightbulb, light-blue background',
+            },
+            {
+              path: '/avatars/assist-3.png',
+              desc: 'Young female assistant with round glasses and dark bob, hugging a teal tablet, green background',
+            },
+            {
+              path: '/avatars/student-1.png',
+              desc: 'Energetic winking boy making finger guns, lightning-bolt tee, amber background with stars',
+            },
+            {
+              path: '/avatars/student-2.png',
+              desc: 'Wide-eyed curious girl holding a giant pencil, pink background with question marks',
+            },
+            {
+              path: '/avatars/student-3.png',
+              desc: 'Diligent kid in round glasses hugging a notebook, cyan background with lined-paper stripes',
+            },
+            {
+              path: '/avatars/student-4.png',
+              desc: 'Confident class monitor with red armband, hand raised high, violet background',
+            },
+            {
+              path: '/avatars/teacher-3-f.png',
+              desc: 'Female teacher with dark bob and round glasses, teal blazer, raised finger and glowing idea lightbulb, light-blue background',
+            },
+            {
+              path: '/avatars/user-3.png',
+              desc: 'Learner avatar: short black hair, orange headphones around neck, mint hoodie, waving, mint background',
+            },
+            {
+              path: '/avatars/user-3-b.png',
+              desc: 'Learner avatar: girl with high ponytail, lavender sweater, open notebook, pink background',
+            },
+            {
+              path: '/avatars/user-3-c.png',
+              desc: 'Learner avatar: boy with round glasses, striped amber tee, hand raised to ask, amber background',
+            },
+            {
+              path: '/avatars/user-3-d.png',
+              desc: 'Learner avatar: girl with dark bob and white headphones, sky-blue top, sky background',
+            },
           ];
 
           const getAvailableVoicesForGeneration = () => {
@@ -1036,10 +1080,13 @@ function GenerationPreviewContent() {
       const remaining = outlines.filter((o) => o.order !== firstScene.order);
       store.setGeneratingOutlines(remaining);
 
-      // Store generation params for classroom to continue generation
+      // Store generation params for classroom to continue generation. The
+      // stageId scopes the entry: the classroom resume path ignores a stale
+      // entry that belongs to another course.
       sessionStorage.setItem(
         'generationParams',
         JSON.stringify({
+          stageId: stage.id,
           pdfImages: currentSession.pdfImages,
           agents,
           userProfile,

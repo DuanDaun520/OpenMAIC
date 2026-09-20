@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -23,18 +23,13 @@ describe('exercise lesson skill discovery', () => {
 
   it.each(supportedLocales)('has explicit workbench display copy for $code', ({ code }) => {
     const handle = 'zone-of-proximal-development';
-    // Inspect overlay files themselves: merged resources could silently fall
-    // back to English (or Simplified Chinese) when a translation is missing.
-    const resource =
-      code === 'en-US' || code === 'zh-CN'
-        ? workbenchResourceFor(code)
-        : JSON.parse(
-            readFileSync(join(process.cwd(), 'lib/i18n/workbench-locales', `${code}.json`), 'utf8'),
-          );
+    // Both shipped locales are written in full in workbench.ts — no overlay
+    // files to fall back through, so the merged resource IS the locale's copy.
+    const resource = workbenchResourceFor(code) as { skill?: { title?: Record<string, string> } };
     const localized = resource.skill?.title?.[handle];
 
     expect(typeof localized).toBe('string');
-    expect(localized.trim()).not.toBe('');
+    expect(localized?.trim()).not.toBe('');
     expect(skillTitle({ name: handle, source: 'builtin' }, createWorkbenchTranslator(code))).toBe(
       localized,
     );

@@ -10,14 +10,19 @@
     "close": "Close"
   },
   "home": {
-    "slogan": "Generative Learning in Multi-Agent Interactive Classroom",
-    "greetingWithName": "Hi, {{name}}"
+    "slogan": "AI-generated courseware + interactive classroom: learning made easy",
+    "knowYou": "HI, help your AI teacher know you",
+    "recommendedTitle": "Recommended Courses",
+    "recommendedSubtitle": "Hand-picked courses — click any card to jump straight into class",
+    "recommendedEmpty": "No recommended courses yet",
+    "recommendedCategoryFallback": "General",
+    "recommendedTagAi": "AI-generated",
+    "recommendedAuthor": "AI Classroom"
   },
   "toolbar": {
     "pdfParser": "Parser",
     "pdfUpload": "Upload PDF",
     "removePdf": "Remove file",
-    "documentExtractor": "Extractor",
     "courseMaterialUpload": "Upload course material",
     "courseMaterialsSelected": "{{n}} materials selected",
     "courseMaterialMergeOrder": "Materials are merged in the order shown below.",
@@ -30,7 +35,7 @@
     "selectProvider": "Select provider",
     "configureProvider": "Set up model",
     "configureProviderHint": "Configure at least one model provider to generate courses",
-    "enterClassroom": "Enter Classroom",
+    "generateCourseware": "Generate Courseware",
     "advancedSettings": "Advanced Settings",
     "thinking": "Thinking",
     "thinkingBudget": "Budget",
@@ -200,9 +205,9 @@
     }
   },
   "agentBar": {
-    "readyToLearn": "Ready to learn together?",
-    "expandedTitle": "Classroom Role Config",
-    "configTooltip": "Click to configure classroom roles",
+    "presetLabel": "Set up AI teacher & classmates",
+    "presetTitle": "Preset AI teacher & classmates",
+    "configTooltip": "Set up the AI teacher & classmates",
     "voiceLabel": "Voice",
     "voiceLoading": "Loading...",
     "voiceAutoAssign": "Voices will be auto-assigned",
@@ -226,6 +231,8 @@
     "generating": "Generating...",
     "paused": "Paused",
     "generationFailed": "Generation failed",
+    "generationInterrupted": "Generation interrupted",
+    "generationInterruptedReason": "Generation was interrupted before it finished (the page was closed or the run stopped). Click retry to continue.",
     "confirmSwitchTitle": "Switch Scene",
     "confirmSwitchMessage": "A topic is currently in progress. Switching scenes will end the current topic. Are you sure?",
     "generatingNextPage": "Scene is being generated, please wait...",
@@ -234,7 +241,20 @@
     "exitFullscreen": "Exit Fullscreen",
     "editCourse": "Edit course",
     "doneEditing": "Done editing",
-    "proModeDisabledHint": "Editing isn't available on this page — open a course slide to edit with Pro mode."
+    "proModeDisabledHint": "This page cannot be edited — open any course page to enter courseware edit mode.",
+    "confirmLeaveHome": "Leave the classroom and open the home page?",
+    "confirmLeaveBack": "Leave this course?",
+    "backToPrevPage": "Go back",
+    "togglePageList": "Toggle page list",
+    "toggleChatPanel": "Toggle chat panel",
+    "courseInfo": "Course Info",
+    "courseInfoName": "Course Name",
+    "courseInfoDesc": "Description",
+    "courseInfoAuthor": "Author",
+    "courseInfoCreatedAt": "Created",
+    "courseInfoNoDesc": "No description yet",
+    "courseInfoAuthorSelf": "Me",
+    "courseInfoAuthorAnonymous": "Anonymous"
   },
   "edit": {
     "proMode": "Pro",
@@ -647,7 +667,8 @@
     "dock": {
       "elementRefHint": "Element references — pick elements to send with your next message",
       "globalTools": "Global tools"
-    }
+    },
+    "coursewareMode": "Edit Courseware"
   },
   "classroomComplete": {
     "title": "Course complete",
@@ -1019,7 +1040,7 @@
     "pdfSizeLimit": "Supports PDF files up to 50MB",
     "courseMaterialSizeLimit": "Documents, slides, spreadsheets, images, and plain text — up to 50MB (accepted formats depend on the selected extractor)",
     "generateFailed": "Failed to generate classroom, please try again",
-    "requirementPlaceholder": "Tell me anything you want to learn, e.g.\n\"Teach me Python from scratch in 30 minutes\"\n\"Explain Fourier Transform on the whiteboard\"\n\"How to play the board game Avalon\"",
+    "requirementPlaceholder": "Type anything you want to learn, e.g.:\n[Intro to gross margin basics]\n[How to forecast sales? Add plenty of demos and class discussion]\n[Learn SQL from scratch — I'm great with Excel; help me learn SQL through Excel habits]\n[Category strategy basics — keep it lively, at least 15 pages, rich with visuals]\n[For drug procurement: how do I calculate product costs?]",
     "requirementRequired": "Please enter course requirements",
     "fileTooLarge": "File too large. Please select a file smaller than 50MB",
     "courseMaterialCountLimit": "You can upload up to 5 course material files",
@@ -1192,10 +1213,10 @@
     "agentNames": {
       "default-1": "AI Teacher",
       "default-2": "AI Assistant",
-      "default-3": "Class Clown",
-      "default-4": "Curious Mind",
-      "default-5": "Note Taker",
-      "default-6": "Deep Thinker"
+      "default-3": "Xiaoqu (Meme Buddy)",
+      "default-4": "Xiaoqi (Curious Classmate)",
+      "default-5": "Xiaoqin (Diligent Note-Taker)",
+      "default-6": "Xiaosi (Study Rep)"
     },
     "agentRoles": {
       "teacher": "Teacher",
@@ -1233,6 +1254,7 @@
       "xiaomi": "Xiaomi MiMo",
       "lemonade": "Lemonade (Local)",
       "ollama": "Ollama (Local)",
+      "serpbase": "SerpBase",
       "tavily": "Tavily",
       "exa": "Exa",
       "bocha": "Bocha",
@@ -1987,7 +2009,10 @@
     "avatarHint": "Your avatar will appear in classroom discussions and chats",
     "fileTooLarge": "Image too large — please choose one under 5 MB",
     "invalidFileType": "Please select an image file",
-    "editTooltip": "Click to edit profile"
+    "editTooltip": "Click to edit profile",
+    "knowYouTitle": "Help your AI teacher know you better",
+    "bioHint": "Introduce yourself and share how familiar you are with the current topic.",
+    "done": "Done"
   },
   "media": {
     "imageCapability": "Image Generation",
@@ -2003,6 +2028,27 @@
     "voice": "Voice",
     "speed": "Speed",
     "language": "Language"
+  },
+  "generationLog": {
+    "title": "AI Production Log",
+    "clear": "Clear",
+    "empty": "No production log yet",
+    "generating": "AI is producing the courseware",
+    "failedCount": "{{count}} page(s) failed — click to view the log",
+    "m": {
+      "start": "Started: {{count}} page(s) to produce",
+      "contentStart": "Page {{order}} \"{{title}}\": generating page content",
+      "actionsStart": "Page {{order}} \"{{title}}\": generating narration actions & voice",
+      "sceneDone": "Page {{order}} \"{{title}}\" completed",
+      "contentFailed": "Page {{order}} \"{{title}}\" content generation failed: {{error}}",
+      "actionsFailed": "Page {{order}} \"{{title}}\" action generation failed: {{error}}",
+      "ttsFailed": "Page {{order}} \"{{title}}\" speech synthesis failed: {{error}}",
+      "failed": "Page {{order}} \"{{title}}\" generation failed: {{error}}",
+      "mediaFailed": "Image/video asset generation hit a problem: {{error}}",
+      "retry": "Retrying page {{order}} \"{{title}}\"",
+      "completed": "All {{count}} pages completed",
+      "paused": "Generation paused"
+    }
   },
   "proMode": {
     "attach": "Attach material",
@@ -2026,6 +2072,18 @@
     "title": "Enter Access Code",
     "placeholder": "Access code",
     "error": "Invalid access code. Please try again."
+  },
+  "login": {
+    "title": "Welcome back",
+    "description": "Sign in with your employee ID and password to start learning",
+    "username": "Employee ID",
+    "password": "Password",
+    "submit": "Sign in",
+    "hint": "Contact the admin for new accounts or password resets",
+    "failed": "Sign-in failed. Please try again later",
+    "networkError": "Network error. Please try again later",
+    "loginFirst": "Please sign in before generating a course",
+    "backHome": "Back to home"
   },
   "workbench": {
     "tool": {

@@ -1,7 +1,7 @@
 'use client';
 
 /** Browser-side premeasurement for deterministic Quiz question-list export. */
-import type { Locale } from '@/lib/i18n';
+import type { ExportLocale } from '@/lib/video-export-app/cover-config';
 import {
   prepareQuizQuestionList,
   quizQuestionListCss,
@@ -27,7 +27,7 @@ export interface MeasureQuizQuestionListInput {
   content: QuizQuestionListContent;
   width: number;
   height: number;
-  locale: Locale;
+  locale: ExportLocale;
   labels: CoverCardLabels;
 }
 
@@ -186,7 +186,7 @@ export interface CreateQuizLayoutProbeInput {
   scenes: readonly CompilerScene[];
   width: number;
   height: number;
-  locale: Locale;
+  locale: ExportLocale;
   labels: CoverCardLabels;
 }
 

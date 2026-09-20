@@ -8,24 +8,12 @@
  * read a language from, so they take a translator and this module can build one
  * synchronously.
  *
- * Two locales are written here — `workbenchEn` is the shape every other locale
- * is checked against, `workbenchZh` is its Chinese twin — and the remaining ten
- * are JSON overlays in `workbench-locales/`, merged by `workbenchResourceFor`
- * with English (or, for `zh-TW`, Simplified) underneath. So an untranslated key
- * degrades to a readable sentence rather than to `workbench.tool.label.x`, and
- * `tests/workbench/workbench-i18n.test.ts` holds the ten to the shape.
+ * The UI ships exactly two locales, both written here in full: `workbenchEn`
+ * is the shape every locale is checked against, `workbenchZh` is its Chinese
+ * twin. `workbenchResourceFor` picks one by language prefix — any other locale
+ * resolves to English — and `tests/workbench/workbench-i18n.test.ts` holds
+ * both to the shape.
  */
-import workbenchArSA from './workbench-locales/ar-SA.json' with { type: 'json' };
-import workbenchDeDE from './workbench-locales/de-DE.json' with { type: 'json' };
-import workbenchEsMX from './workbench-locales/es-MX.json' with { type: 'json' };
-import workbenchFrFR from './workbench-locales/fr-FR.json' with { type: 'json' };
-import workbenchJaJP from './workbench-locales/ja-JP.json' with { type: 'json' };
-import workbenchKoKR from './workbench-locales/ko-KR.json' with { type: 'json' };
-import workbenchPtBR from './workbench-locales/pt-BR.json' with { type: 'json' };
-import workbenchRuRU from './workbench-locales/ru-RU.json' with { type: 'json' };
-import workbenchViVN from './workbench-locales/vi-VN.json' with { type: 'json' };
-import workbenchZhTW from './workbench-locales/zh-TW.json' with { type: 'json' };
-
 export const workbenchEn = {
   common: {
     loading: 'Loading',
@@ -666,55 +654,19 @@ function readPath(value: unknown, path: readonly string[]): unknown {
 
 type WorkbenchResource = Record<string, unknown>;
 
-/**
- * The other ten locales.
- *
- * `workbenchEn` is the shape and `workbenchZh` is its Chinese twin; every other
- * locale is a JSON overlay on one of those two, so a key that a locale has not
- * translated yet resolves to English (or, for `zh-TW`, to Simplified) instead of
- * to the key. Same precedence as i18next applies to `live-locales/*.json`, which
- * is what keeps the hook-free translator below and the React `t` in agreement.
- */
-const localeOverrides: Record<string, WorkbenchResource> = {
-  'zh-TW': workbenchZhTW,
-  'ja-JP': workbenchJaJP,
-  'ko-KR': workbenchKoKR,
-  'de-DE': workbenchDeDE,
-  'fr-FR': workbenchFrFR,
-  'es-MX': workbenchEsMX,
-  'pt-BR': workbenchPtBR,
-  'ru-RU': workbenchRuRU,
-  'ar-SA': workbenchArSA,
-  'vi-VN': workbenchViVN,
-};
-
-function isRecord(value: unknown): value is WorkbenchResource {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function mergeResource(base: WorkbenchResource, overlay: WorkbenchResource): WorkbenchResource {
-  const result: WorkbenchResource = { ...base };
-  for (const [key, value] of Object.entries(overlay)) {
-    result[key] =
-      isRecord(value) && isRecord(result[key])
-        ? mergeResource(result[key] as WorkbenchResource, value)
-        : value;
-  }
-  return result;
-}
-
 const resourceCache = new Map<string, WorkbenchResource>();
 
 /**
  * The whole workbench copy map for one locale — the resource i18next registers
- * under `workbench.*` and the table the hook-free translator reads.
+ * under `workbench.*` and the table the hook-free translator reads. Any locale
+ * outside the two shipped ones resolves to the English map, never to the key.
  */
 export function workbenchResourceFor(locale: string): WorkbenchResource {
   const cached = resourceCache.get(locale);
   if (cached) return cached;
-  const base: WorkbenchResource = locale.toLowerCase().startsWith('zh') ? workbenchZh : workbenchEn;
-  const overlay = localeOverrides[locale];
-  const resource = overlay ? mergeResource(base, overlay) : base;
+  const resource: WorkbenchResource = locale.toLowerCase().startsWith('zh')
+    ? workbenchZh
+    : workbenchEn;
   resourceCache.set(locale, resource);
   return resource;
 }

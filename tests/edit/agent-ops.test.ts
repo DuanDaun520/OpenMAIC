@@ -36,8 +36,8 @@ describe('createAgentConfig', () => {
     expect(a.id).toBe('gen-x');
     expect(a.role).toBe('student');
     expect(a.priority).toBe(5);
-    // 13 % 10 === 3 -> AGENT_DEFAULT_AVATARS[3] = '/avatars/thinker.png'
-    expect(a.avatar).toBe('/avatars/thinker.png');
+    // 13 % 16 === 13 -> AGENT_DEFAULT_AVATARS[13] = '/avatars/student-2.png'
+    expect(a.avatar).toBe('/avatars/student-2.png');
   });
 });
 

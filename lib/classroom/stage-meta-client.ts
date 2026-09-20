@@ -15,11 +15,25 @@ export type StageMetaResult =
   | { outcome: 'absent' }
   | { outcome: 'unavailable' };
 
+/**
+ * How old the generation heartbeat may be and still count as "a live tab is
+ * generating". The generating browser re-pulses every 30s, so a full window
+ * of missed pulses (plus generous client/server clock skew) has to pass
+ * before a pending page is presented as interrupted rather than generating.
+ */
+export const GENERATION_HEARTBEAT_STALE_MS = 3 * 60_000;
+
 export interface StageMetaView {
   isOwner: boolean;
   isPublic: boolean;
   publishedAt: number | null;
   generationComplete: boolean;
+  /** Server-clock epoch millis of the last generation liveness pulse. */
+  generationHeartbeatAt?: number | null;
+  /** Last recorded generation failure reason, when one is on record. */
+  generationError?: string | null;
+  /** The course's explicit AI cover URL, when one was generated. */
+  coverUrl?: string | null;
   /** Which layer answered. Diagnostic only — nothing may branch on it. */
   source?: string;
 }
@@ -56,6 +70,15 @@ export async function fetchStageMeta(
         isPublic: body.isPublic === true,
         publishedAt: typeof body.publishedAt === 'number' ? body.publishedAt : null,
         generationComplete: body.generationComplete === true,
+        generationHeartbeatAt:
+          typeof body.generationHeartbeatAt === 'number' ? body.generationHeartbeatAt : null,
+        generationError:
+          typeof body.generationError === 'string' && body.generationError.length > 0
+            ? body.generationError
+            : null,
+        ...(typeof body.coverUrl === 'string' && body.coverUrl.length > 0
+          ? { coverUrl: body.coverUrl }
+          : {}),
         ...(typeof body.source === 'string' ? { source: body.source } : {}),
       },
     };

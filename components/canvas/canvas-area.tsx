@@ -24,6 +24,10 @@ interface CanvasAreaProps extends CanvasToolbarProps {
   readonly isPendingScene?: boolean;
   readonly isCourseComplete?: boolean;
   readonly isGenerationFailed?: boolean;
+  /** Why generation failed — provider message, or the interrupted reason. */
+  readonly generationErrorText?: string;
+  /** True when the run died with its tab instead of failing on an error. */
+  readonly generationInterrupted?: boolean;
   readonly onRetryGeneration?: () => void;
   readonly elementPickActive?: boolean;
   readonly onPickElement?: (element: PPTElement) => void;
@@ -40,10 +44,6 @@ export function CanvasArea({
   isSoftClosing,
   softCloseDeadline,
   whiteboardOpen,
-  sidebarCollapsed,
-  chatCollapsed,
-  onToggleSidebar,
-  onToggleChat,
   onPrevSlide,
   onNextSlide,
   onPlayPause,
@@ -57,6 +57,8 @@ export function CanvasArea({
   isPendingScene,
   isCourseComplete,
   isGenerationFailed,
+  generationErrorText,
+  generationInterrupted,
   onRetryGeneration,
   elementPickActive,
   onPickElement,
@@ -170,7 +172,7 @@ export function CanvasArea({
                 className="absolute inset-0 z-[105] flex flex-col items-center justify-center bg-white dark:bg-gray-800"
               >
                 {isGenerationFailed ? (
-                  <div className="flex flex-col items-center gap-3">
+                  <div className="flex flex-col items-center gap-3 px-8">
                     <div className="w-12 h-12 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center">
                       <svg
                         className="w-6 h-6 text-red-400 dark:text-red-500"
@@ -187,8 +189,18 @@ export function CanvasArea({
                       </svg>
                     </div>
                     <span className="text-sm text-red-500 dark:text-red-400 font-medium">
-                      {t('stage.generationFailed')}
+                      {generationInterrupted
+                        ? t('stage.generationInterrupted')
+                        : t('stage.generationFailed')}
                     </span>
+                    {generationErrorText && (
+                      <span
+                        className="max-w-md text-center text-xs text-gray-400 dark:text-gray-500 leading-relaxed break-words line-clamp-3"
+                        title={generationErrorText}
+                      >
+                        {generationErrorText}
+                      </span>
+                    )}
                     {onRetryGeneration && (
                       <button
                         onClick={onRetryGeneration}
@@ -285,10 +297,6 @@ export function CanvasArea({
           isSoftClosing={isSoftClosing}
           softCloseDeadline={softCloseDeadline}
           whiteboardOpen={whiteboardOpen}
-          sidebarCollapsed={sidebarCollapsed}
-          chatCollapsed={chatCollapsed}
-          onToggleSidebar={onToggleSidebar}
-          onToggleChat={onToggleChat}
           onPrevSlide={onPrevSlide}
           onNextSlide={onNextSlide}
           onPlayPause={onPlayPause}

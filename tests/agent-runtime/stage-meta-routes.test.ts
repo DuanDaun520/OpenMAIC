@@ -59,6 +59,7 @@ beforeEach(() => {
     meta_generation_complete: false,
     meta_deleted_at: null,
     document_name: 'Course',
+    cover_url: '/api/classroom-media/x/media/generated-cover.png',
   };
   mocks.updatedRows = [{ stage_id: STAGE_ID }];
 });
@@ -75,6 +76,7 @@ describe('GET /api/stage-meta/[stageId]', () => {
       isPublic: false,
       publishedAt: null,
       generationComplete: false,
+      coverUrl: '/api/classroom-media/x/media/generated-cover.png',
       source: 'document',
     });
   });

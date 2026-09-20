@@ -1076,6 +1076,21 @@ describe('embedded persistence route', () => {
     // back to a Response) is the most bug-prone code in the route — exercise a
     // full body round-trip, a 204, multi-value headers, and path encoding.
     const seen: Array<{ method?: string; url?: string; body: string }> = [];
+    // The adapter test PUTs a document (create), which the route reserves for
+    // signed-in accounts — pin the owner resolution to a fixed user session so
+    // the transport assertions run under a `user:` owner instead of a minted
+    // anonymous partition (which the create gate would refuse with 401).
+    vi.doMock('@/lib/server/user-auth', () => ({
+      readUserSessionToken: () => undefined,
+      validateUserSession: async () => ({
+        userId: 'adapter-test-user',
+        username: 'adapter',
+        displayName: null,
+        avatarUrl: null,
+        nickname: null,
+        bio: null,
+      }),
+    }));
     vi.doMock('@openmaic/storage/runtime/pg', () => ({
       ensureSchema: vi.fn().mockResolvedValue(undefined),
       PgRuntimeStore: class {},

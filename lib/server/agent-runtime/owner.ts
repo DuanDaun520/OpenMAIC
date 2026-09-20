@@ -54,11 +54,10 @@ function anonymousCookieHeader(id: string): string {
  * — the headers the caller returns to the client — is required: it receives
  * the outgoing Set-Cookie header whenever a new cookie is issued.
  *
- * Current callers (the agent event-stream routes) pass no authenticated
- * owner: for them this slice resolves only the anonymous cookie identity. A
- * future auth integration must thread `authenticatedOwnerId` through those
- * call sites, or sessions created under authenticated identities would be
- * unreachable by their own owner.
+ * The auth integration this reserved is live one layer up: ./auth-owner.ts
+ * resolves the product session and calls this slice with the resulting
+ * `user:<id>` string, while unauthenticated requests keep the anonymous
+ * cookie behavior below.
  */
 export function resolveRequestOwnerId(
   req: Pick<Request, 'headers'>,
@@ -73,4 +72,29 @@ export function resolveRequestOwnerId(
   const id = randomUUID();
   responseHeaders.append('Set-Cookie', anonymousCookieHeader(id));
   return `anon:${id}`;
+}
+
+/**
+ * Read-only variant of {@link resolveRequestOwnerId} for callers that only
+ * want attribution (usage ledger rows, quota checks) and must not mint a new
+ * identity: returns the existing owner string, or undefined when the request
+ * carries no valid anonymous cookie. No Set-Cookie is ever produced.
+ */
+export function readRequestOwnerId(req: Pick<Request, 'headers'>): string | undefined {
+  const existingId = readCookie(req.headers, ANONYMOUS_COOKIE);
+  return existingId && UUID_V4.test(existingId) ? `anon:${existingId}` : undefined;
+}
+
+/** The existing anonymous owner string, if the request carries a valid cookie.
+ * Exported for the login claim path, which must know exactly which partition
+ * it is about to move — never a minted one. */
+export function readAnonymousOwnerId(req: Pick<Request, 'headers'>): string | undefined {
+  return readRequestOwnerId(req);
+}
+
+/** A Set-Cookie header value rotating `anonymous_id` to a fresh UUID. Used by
+ * login (after the old partition was claimed) and logout so no stale anonymous
+ * partition survives an identity change on the same browser. */
+export function mintAnonymousCookieHeader(): string {
+  return anonymousCookieHeader(randomUUID());
 }

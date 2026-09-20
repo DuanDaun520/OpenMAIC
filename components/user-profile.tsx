@@ -9,14 +9,13 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { toast } from 'sonner';
 import { useUserProfileStore, AVATAR_OPTIONS } from '@/lib/store/user-profile';
+import { resizeAvatarToDataUrl } from '@/lib/utils/avatar-upload';
+
 
 /** Check whether avatar is a custom upload (data-URL) */
 function isCustomAvatar(avatar: string) {
   return avatar.startsWith('data:');
 }
-
-/** Max uploaded image size before we reject */
-const MAX_AVATAR_SIZE = 5 * 1024 * 1024; // 5 MB
 
 const FILE_INPUT_ID = 'user-avatar-upload';
 
@@ -57,34 +56,16 @@ export function UserProfileCard() {
 
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > MAX_AVATAR_SIZE) {
-      toast.error(t('profile.fileTooLarge'));
-      return;
-    }
-    if (!file.type.startsWith('image/')) {
-      toast.error(t('profile.invalidFileType'));
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = 128;
-        canvas.height = 128;
-        const ctx = canvas.getContext('2d')!;
-        const scale = Math.max(128 / img.width, 128 / img.height);
-        const w = img.width * scale;
-        const h = img.height * scale;
-        ctx.drawImage(img, (128 - w) / 2, (128 - h) / 2, w, h);
-        setAvatar(canvas.toDataURL('image/jpeg', 0.85));
-      };
-      img.src = reader.result as string;
-    };
-    reader.readAsDataURL(file);
     e.target.value = '';
+    if (!file) return;
+    resizeAvatarToDataUrl(file).then(
+      (dataUrl) => setAvatar(dataUrl),
+      (reason) => {
+        toast.error(
+          reason === 'too-large' ? t('profile.fileTooLarge') : t('profile.invalidFileType'),
+        );
+      },
+    );
   };
 
   if (!hydrated) {

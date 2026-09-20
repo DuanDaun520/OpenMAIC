@@ -47,6 +47,7 @@ import { useI18n } from '@/lib/hooks/use-i18n';
 import { FileQuestion, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
+import { useTeacherAvatarVoiceSync } from '@/lib/orchestration/registry/teacher-avatar';
 import {
   applyClassroomStageAndScenes,
   defaultClassroomLoadDeps,
@@ -57,7 +58,7 @@ import {
   resolveClassroomSurfaceView,
   shouldResumeClassroomGeneration,
 } from '@/lib/classroom/progressive-load-policy';
-import { fetchStageMeta } from '@/lib/classroom/stage-meta-client';
+import { fetchStageMeta, GENERATION_HEARTBEAT_STALE_MS } from '@/lib/classroom/stage-meta-client';
 import {
   classroomGenerationOwnership,
   noteStageOwnership,
@@ -88,6 +89,9 @@ export function ClassroomSurface({
   const { loadFromStorage } = useStageStore();
   const loadedClassroomId = useStageStore((s) => s.stage?.id ?? null);
   const { t } = useI18n();
+  // Keep the default teacher's portrait matched to the narration voice's
+  // gender (female voice → female teacher avatar) for the whole classroom.
+  useTeacherAvatarVoiceSync();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -113,7 +117,7 @@ export function ClassroomSurface({
   const activeClassroomIdRef = useRef<string | null>(null);
   const loadEpochRef = useRef(0);
 
-  const { generateRemaining, retrySingleOutline, stop } = useSceneGenerator({
+  const { generateRemaining, retrySingleOutline } = useSceneGenerator({
     onComplete: () => {
       log.info('[Classroom] All scenes generated');
     },
@@ -227,6 +231,20 @@ export function ClassroomSurface({
               noteStageOwnership(classroomId, true, null);
             }
           }
+          // Generation liveness: fold the heartbeat + recorded error into the
+          // store. A stale heartbeat seeds pending outlines as failed/interrupted
+          // (with the reason) instead of the eternal spinner; a fresh one means
+          // some live tab is generating and the spinner is the truth. Runs for
+          // both variants — a pane viewer asks the same question.
+          if (result.outcome === 'found') {
+            useStageStore.getState().applyGenerationMeta({
+              heartbeatAt: result.meta.generationHeartbeatAt ?? null,
+              error: result.meta.generationError ?? null,
+              nowMs: Date.now(),
+              interruptedReason: t('stage.generationInterruptedReason'),
+              staleMs: GENERATION_HEARTBEAT_STALE_MS,
+            });
+          }
           return ownership;
         } catch {
           if (!isCurrent()) return 'unresolved';
@@ -238,7 +256,7 @@ export function ClassroomSurface({
 
       void retryWhileOwnershipUnresolved(askOwnership, { isCurrent });
     },
-    [classroomId, variant],
+    [classroomId, t, variant],
   );
 
   const retryClassroom = useCallback(() => {
@@ -268,6 +286,21 @@ export function ClassroomSurface({
       }
     });
   }, [classroomId, loadClassroom, refreshOwnership, variant]);
+
+  // 已学习 touch — record this open for the My Courses shelf (已学习 tab).
+  // Best-effort attribution: one fire-and-forget POST per classroom, never
+  // awaited by the load path, never surfaced (a failed touch must not
+  // disturb the classroom); a nonexistent id just answers 404 harmlessly.
+  const learnedTouchRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (learnedTouchRef.current === classroomId) return;
+    learnedTouchRef.current = classroomId;
+    void fetch('/api/my-courses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'learned', stageId: classroomId }),
+    }).catch(() => undefined);
+  }, [classroomId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -361,7 +394,11 @@ export function ClassroomSurface({
     };
     void loadUntilAvailable();
 
-    // Cancel ongoing generation when classroomId changes or component unmounts
+    // Leaving the classroom no longer pauses generation: the run lives at
+    // module scope (use-scene-generator's tab-wide RUN) and keeps generating
+    // in the background while the user is elsewhere in the app. It halts
+    // itself when another course takes over the shared stage store — the
+    // boundary the old unmount-time abort used to draw.
     return () => {
       cancelled = true;
       if (loadEpochRef.current === loadEpoch) {
@@ -371,9 +408,8 @@ export function ClassroomSurface({
         activeClassroomIdRef.current = null;
       }
       if (retryTimer) clearTimeout(retryTimer);
-      stop();
     };
-  }, [classroomId, loadClassroom, refreshOwnership, stop, variant]);
+  }, [classroomId, loadClassroom, refreshOwnership, variant]);
 
   // Narration written before this application stored media server-side is a
   // derived key that only this browser can resolve. Both classroom surfaces
@@ -425,9 +461,16 @@ export function ClassroomSurface({
     if (hasPending && stage) {
       generationStartedRef.current = true;
 
-      // Load generation params from sessionStorage (stored by generation-preview before navigating)
+      // Load generation params from sessionStorage (stored by generation-preview before navigating).
+      // The entry is stage-scoped when it carries a stageId: a stale entry from
+      // another course must not feed this course's resume (its pdfImages/agents
+      // belong elsewhere), so a mismatch falls back to the reconstructed params.
       const genParamsStr = sessionStorage.getItem('generationParams');
-      const params = genParamsStr ? JSON.parse(genParamsStr) : {};
+      const storedParams = genParamsStr ? JSON.parse(genParamsStr) : {};
+      const params =
+        typeof storedParams.stageId === 'string' && storedParams.stageId !== stage.id
+          ? {}
+          : storedParams;
 
       // Reconstruct imageMapping for the resumed generation. The mapping may
       // MIX allocated asset ids and IndexedDB data URLs — a source whose cache

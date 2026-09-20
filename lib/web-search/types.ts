@@ -6,6 +6,7 @@
  * Web Search Provider IDs
  */
 export type WebSearchProviderId =
+  | 'serpbase'
   | 'tavily'
   | 'exa'
   | 'bocha'

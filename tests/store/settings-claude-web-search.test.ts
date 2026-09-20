@@ -41,6 +41,6 @@ describe('claude web search settings', () => {
     expect(useSettingsStore.getState().webSearchProviderId).toBe('claude');
 
     s.setWebSearchProviderConfig('claude', { enabled: false });
-    expect(useSettingsStore.getState().webSearchProviderId).toBe('tavily');
+    expect(useSettingsStore.getState().webSearchProviderId).toBe('serpbase');
   });
 });
