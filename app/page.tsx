@@ -505,6 +505,12 @@ function HomePage() {
             className="text-5xl md:text-6xl font-extrabold tracking-tight leading-tight text-violet-600 dark:text-violet-400"
           >
             AI Classroom
+            {/* 非正式版本 — small marker at the title's top-right, riding the
+                h1's line box so it flows before the absolutely-positioned
+                ProBadge instead of colliding with it. */}
+            <span className="ml-2 inline-block align-top rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium leading-none tracking-wide text-amber-600 dark:text-amber-400">
+              {t('home.informalBuildBadge')}
+            </span>
           </motion.h1>
           {workbenchEntryEnabled ? (
             <div

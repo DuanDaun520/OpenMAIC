@@ -11,6 +11,7 @@
   },
   "home": {
     "slogan": "AI生成课件+交互课堂：让学习变得轻松",
+    "informalBuildBadge": "非正式版本",
     "knowYou": "HI，让AI老师更了解你",
     "recommendedTitle": "推荐课程",
     "recommendedSubtitle": "精选好课，点击卡片直达课堂",
@@ -1036,7 +1037,10 @@
     "notFoundDesc": "课程不存在，或已被删除。",
     "loadUnavailable": "暂时无法加载这门课程",
     "loadUnavailableDesc": "无法获取课程，请检查访问权限或重试。",
-    "backToHome": "返回首页"
+    "backToHome": "返回首页",
+    "loginRequired": "请先登录",
+    "loginRequiredDesc": "登录后即可打开并学习这门课程。",
+    "goToLogin": "去登录"
   },
   "upload": {
     "pdfSizeLimit": "支持最大50MB的PDF文件",

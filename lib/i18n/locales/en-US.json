@@ -11,6 +11,7 @@
   },
   "home": {
     "slogan": "AI-generated courseware + interactive classroom: learning made easy",
+    "informalBuildBadge": "Informal build",
     "knowYou": "HI, help your AI teacher know you",
     "recommendedTitle": "Recommended Courses",
     "recommendedSubtitle": "Hand-picked courses — click any card to jump straight into class",
@@ -1036,7 +1037,10 @@
     "notFoundDesc": "This course does not exist, or it has been deleted.",
     "loadUnavailable": "Couldn't load this course",
     "loadUnavailableDesc": "The course could not be retrieved. Check your access or try again.",
-    "backToHome": "Back to home"
+    "backToHome": "Back to home",
+    "loginRequired": "Sign in required",
+    "loginRequiredDesc": "Sign in to open and study this course.",
+    "goToLogin": "Sign in"
   },
   "upload": {
     "pdfSizeLimit": "Supports PDF files up to 50MB",

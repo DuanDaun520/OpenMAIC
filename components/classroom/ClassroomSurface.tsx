@@ -24,6 +24,13 @@
  * (`app/classroom/[id]/page.tsx`). The stage-meta sidecar is still consulted:
  * both variants gate generation on ownership, and the standalone page also
  * applies its viewer-specific edit access.
+ *
+ * The standalone page is also LOGIN-gated (the pane is not — its host decides
+ * who may sit in the workspace): `/api/classroom/gate` answers whether this
+ * browser has a product session or an admin preview cookie, and until it says
+ * yes the course neither loads nor renders. A 401 opens the global login
+ * modal in place, exactly like /my-courses, and `openmaic:auth-changed`
+ * re-runs the gate so a successful login fills the page in without a reload.
  */
 
 import { Stage } from '@/components/stage';
@@ -44,7 +51,7 @@ import { createLogger } from '@/lib/logger';
 import { MediaStageProvider } from '@/lib/contexts/media-stage-context';
 import { generateMediaForOutlines } from '@/lib/media/media-orchestrator';
 import { useI18n } from '@/lib/hooks/use-i18n';
-import { FileQuestion, Loader2 } from 'lucide-react';
+import { FileQuestion, Loader2, Lock } from 'lucide-react';
 import Link from 'next/link';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
 import { useTeacherAvatarVoiceSync } from '@/lib/orchestration/registry/teacher-avatar';
@@ -70,6 +77,7 @@ import {
   useMayGenerateForStage,
 } from '@/lib/classroom/generation-permission';
 import { isServerBackedMediaPersistence } from '@/lib/persistence/media-persistence';
+import { useAuthModalStore } from '@/lib/store/auth-modal';
 
 const log = createLogger('Classroom');
 
@@ -96,6 +104,17 @@ export function ClassroomSurface({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loadUnavailable, setLoadUnavailable] = useState(false);
+  /**
+   * Login gate for the standalone page (the pane is never gated — its host
+   * decides who may reach it). 'checking' holds the load at the spinner; a
+   * 401 flips to 'denied', renders the login-required card instead of the
+   * course and opens the global login modal once. Only 'passed' lets the
+   * classroom load (and record its 已学习 touch). The pane short-circuits to
+   * 'passed', so its behavior is exactly what it was.
+   */
+  const [authGate, setAuthGate] = useState<'checking' | 'denied' | 'passed'>(
+    variant === 'page' ? 'checking' : 'passed',
+  );
   /**
    * The load resolved and no source has this course. A TERMINAL state, kept
    * separate from `error`: an error offers a retry, and there is nothing here
@@ -208,6 +227,58 @@ export function ClassroomSurface({
     [classroomId, loadFromStorage, variant],
   );
 
+  // The login gate itself (page variant only). One fetch against
+  // /api/classroom/gate on mount; `openmaic:auth-changed` (fired by the login
+  // modal on success, and by logout) re-runs the very same check, so a login
+  // fills the page in without a reload and a logout re-locks it. The modal is
+  // auto-opened only for the mount-time 401 — a logout must not immediately
+  // nag with a modal on top of the card that already explains the state.
+  // Transient failures (network, 5xx) retry a bounded number of times before
+  // landing on 'denied', whose card offers the login again.
+  useEffect(() => {
+    if (variant !== 'page') return;
+    let cancelled = false;
+    let attempts = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const check = async (fromMount: boolean): Promise<void> => {
+      let status: number;
+      try {
+        const response = await fetch('/api/classroom/gate');
+        status = response.status;
+      } catch {
+        status = 0;
+      }
+      if (cancelled) return;
+      if (status === 200) {
+        setAuthGate('passed');
+        return;
+      }
+      if (status === 401) {
+        setAuthGate('denied');
+        if (fromMount) {
+          useAuthModalStore.getState().openLogin(`/classroom/${classroomId}`);
+        }
+        return;
+      }
+      attempts += 1;
+      if (attempts <= 3) {
+        retryTimer = setTimeout(() => void check(false), 1500);
+        return;
+      }
+      setAuthGate('denied');
+    };
+
+    void check(true);
+    const onAuthChanged = () => void check(false);
+    window.addEventListener('openmaic:auth-changed', onAuthChanged);
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      window.removeEventListener('openmaic:auth-changed', onAuthChanged);
+    };
+  }, [classroomId, variant]);
+
   const refreshOwnership = useCallback(
     (isCurrent: () => boolean) => {
       if (!isCurrent() || !isServerBackedMediaPersistence()) return;
@@ -293,6 +364,9 @@ export function ClassroomSurface({
   // disturb the classroom); a nonexistent id just answers 404 harmlessly.
   const learnedTouchRef = useRef<string | null>(null);
   useEffect(() => {
+    // Not recorded until the login gate passes: a visitor who cannot open the
+    // course has not learned it. (The pane variant is always 'passed'.)
+    if (authGate !== 'passed') return;
     if (learnedTouchRef.current === classroomId) return;
     learnedTouchRef.current = classroomId;
     void fetch('/api/my-courses', {
@@ -300,9 +374,13 @@ export function ClassroomSurface({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'learned', stageId: classroomId }),
     }).catch(() => undefined);
-  }, [classroomId]);
+  }, [classroomId, authGate]);
 
   useEffect(() => {
+    // The login gate owns the page until it passes (page variant): no store
+    // resets, no probes, no load — a browser that may not open this course
+    // must not even start the machinery that would put it on screen.
+    if (authGate !== 'passed') return;
     let cancelled = false;
     const loadEpoch = loadEpochRef.current + 1;
     loadEpochRef.current = loadEpoch;
@@ -409,7 +487,7 @@ export function ClassroomSurface({
       }
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [classroomId, loadClassroom, refreshOwnership, variant]);
+  }, [classroomId, loadClassroom, refreshOwnership, variant, authGate]);
 
   // Narration written before this application stored media server-side is a
   // derived key that only this browser can resolve. Both classroom surfaces
@@ -553,7 +631,29 @@ export function ClassroomSurface({
               : 'h-screen flex flex-col overflow-hidden'
           }
         >
-          {view === 'loading' ? (
+          {variant === 'page' && authGate === 'denied' ? (
+            // Checked before every other view: while the login gate refuses
+            // this browser, nothing about the course — not even its absence
+            // or a load error — is any of the visitor's business.
+            <div
+              className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-gray-900"
+              data-testid="classroom-login-required"
+            >
+              <div className="flex flex-col items-center gap-3 text-center max-w-md px-6">
+                <Lock className="h-10 w-10 text-muted-foreground" />
+                <p className="text-lg font-medium">{t('classroom.loginRequired')}</p>
+                <p className="text-sm text-muted-foreground">{t('classroom.loginRequiredDesc')}</p>
+                <button
+                  onClick={() =>
+                    useAuthModalStore.getState().openLogin(`/classroom/${classroomId}`)
+                  }
+                  className="mt-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+                >
+                  {t('classroom.goToLogin')}
+                </button>
+              </div>
+            </div>
+          ) : view === 'loading' ? (
             <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
               <div className="flex flex-col items-center gap-3 text-muted-foreground">
                 <Loader2 className="h-8 w-8 animate-spin" />

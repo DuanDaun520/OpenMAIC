@@ -975,9 +975,11 @@ export const useSettingsStore = create<SettingsState>()(
         autoPlayLecture: false,
         playbackSpeed: 1,
 
-        // Layout preferences
-        sidebarCollapsed: true,
-        chatAreaCollapsed: true,
+        // Layout preferences — both classroom sidebars (scene outline on the
+        // left, AI chat on the right) OPEN on first visit; the toggles persist
+        // each user's own choice from then on.
+        sidebarCollapsed: false,
+        chatAreaCollapsed: false,
         chatAreaWidth: 320,
         editRailCollapsed: false,
         editRailWidth: 220,
